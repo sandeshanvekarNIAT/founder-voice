@@ -11,7 +11,7 @@ interface WaveformProps {
 
 export function WaveformVisualizer({ mode, audioStream }: WaveformProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
-    const animationRef = useRef<number>();
+    const animationRef = useRef<number>(0);
     const analyserRef = useRef<AnalyserNode | null>(null);
     const dataArrayRef = useRef<Uint8Array | null>(null);
 
@@ -62,7 +62,7 @@ export function WaveformVisualizer({ mode, audioStream }: WaveformProps) {
 
             // User Speaking (Frequency Bars)
             else if (mode === "user" && analyserRef.current && dataArrayRef.current) {
-                analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+                analyserRef.current.getByteFrequencyData(dataArrayRef.current as any);
                 const barWidth = (width / dataArrayRef.current.length) * 2;
                 let x = 0;
 

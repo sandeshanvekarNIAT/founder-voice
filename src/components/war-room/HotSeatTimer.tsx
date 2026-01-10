@@ -13,6 +13,12 @@ export function HotSeatTimer({ durationSeconds, isActive, onTimeEnd }: TimerProp
     const [timeLeft, setTimeLeft] = useState(durationSeconds);
 
     useEffect(() => {
+        if (!isActive) {
+            setTimeLeft(durationSeconds);
+        }
+    }, [isActive, durationSeconds]);
+
+    useEffect(() => {
         if (!isActive || timeLeft <= 0) return;
 
         const interval = setInterval(() => {

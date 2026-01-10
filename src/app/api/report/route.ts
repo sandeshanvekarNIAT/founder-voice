@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import OpenAI from "openai";
+import { GoogleGenerativeAI } from "@google/generative-ai";
 
-export const maxDuration = 60; // Allow long timeouts for o1-mini reasoning
+export const maxDuration = 60;
 
 export async function POST(req: Request) {
     try {
@@ -11,9 +11,14 @@ export async function POST(req: Request) {
             return NextResponse.json({ error: "Invalid transcript" }, { status: 400 });
         }
 
-        const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+        if (!process.env.GOOGLE_API_KEY) {
+            return NextResponse.json({ error: "GOOGLE_API_KEY missing" }, { status: 500 });
+        }
 
-        // Format transcript for the prompt
+        const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
+        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+
+        // Format transcript
         const conversationText = transcript
             .map((t: any) => `${t.role.toUpperCase()}: ${t.text}`)
             .join("\n");
@@ -31,34 +36,34 @@ SCORECARD CRITERIA:
 TRANSCRIPT:
 ${conversationText}
 
-OUTPUT FORMAT (JSON ONLY):
+OUTPUT FORMAT (JSON ONLY, NO MARKDOWN):
 {
   "scores": {
-    "market": number,
-    "tech": number,
-    "economics": number,
-    "readiness": number
+    "market": 0,
+    "tech": 0,
+    "economics": 0,
+    "readiness": 0
   },
-  "summary": "2 sentence summary of the founder's performance.",
+  "summary": "2 sentence summary.",
   "key_risks": ["risk 1", "risk 2"],
-  "coachability_delta": "High/Medium/Low based on reaction to interruptions"
+  "coachability_delta": "High/Medium/Low"
 }
 `;
 
-        const response = await openai.chat.completions.create({
-            model: "o1-mini",
-            messages: [
-                { role: "user", content: prompt }
-            ]
-        });
+        const result = await model.generateContent(prompt);
+        const response = result.response;
+        const text = response.text();
 
-        const content = response.choices[0].message.content;
+        // Clean up markdown if Gemini adds it
+        const cleanJson = text.replace(/```json/g, "").replace(/```/g, "").trim();
 
-        // o1-mini might return markdown fencing around JSON
-        const cleanJson = content?.replace(/```json/g, "").replace(/```/g, "").trim();
-        const data = JSON.parse(cleanJson || "{}");
-
-        return NextResponse.json(data);
+        try {
+            const data = JSON.parse(cleanJson);
+            return NextResponse.json(data);
+        } catch (e) {
+            console.error("JSON Parse Error:", text);
+            return NextResponse.json({ error: "Failed to parse report" }, { status: 500 });
+        }
 
     } catch (error) {
         console.error("Report Generation Error:", error);

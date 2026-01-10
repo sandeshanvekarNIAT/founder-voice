@@ -15,11 +15,17 @@ export const useAudioPlayer = () => {
         }
     }, []);
 
-    const addToQueue = useCallback((base64Delta: string) => {
+    const addToQueue = useCallback((data: string | ArrayBuffer) => {
         if (!audioContextRef.current) initAudioContext();
         const ctx = audioContextRef.current!;
 
-        const audioData = base64ToArrayBuffer(base64Delta);
+        let audioData: ArrayBuffer;
+        if (typeof data === 'string') {
+            audioData = base64ToArrayBuffer(data);
+        } else {
+            audioData = data;
+        }
+
         const int16Array = new Int16Array(audioData);
         const float32Array = new Float32Array(int16Array.length);
 

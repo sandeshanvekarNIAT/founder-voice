@@ -1,171 +1,172 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TranscriptItem } from '@/components/war-room/LiveTranscript';
-import { searchTavily } from '@/actions/tavily';
-
-// Types for Realtime API Events
-type SessionUpdateEvent = {
-    type: 'session.updated';
-    session: any;
-};
+import { createClient, LiveClient, LiveSchema, LiveTranscriptionEvents } from "@deepgram/sdk";
+import { generateVCResponse } from '@/actions/groq';
 
 interface UseRealtimeProps {
-    onAudioDelta: (base64: string) => void;
+    onAudioDelta: (audio: ArrayBuffer) => void;
     onInterruption: () => void;
 }
 
 export const useRealtime = ({ onAudioDelta, onInterruption }: UseRealtimeProps) => {
     const [isConnected, setIsConnected] = useState(false);
-    const [isThinking, setIsThinking] = useState(false); // AI is processing
-    const [isSpeaking, setIsSpeaking] = useState(false); // AI is generating audio
+    const [isThinking, setIsThinking] = useState(false);
+    const [isSpeaking, setIsSpeaking] = useState(false);
     const [transcriptItems, setTranscriptItems] = useState<TranscriptItem[]>([]);
 
-    const socketRef = useRef<WebSocket | null>(null);
+    // We need to keep a clean history for Groq
+    // Using a ref because connection closures might stale closures in event listeners
+    const fullTranscriptRef = useRef<{ role: string, content: string }[]>([]);
+
+    const connectionRef = useRef<LiveClient | null>(null);
+    const socketRef = useRef<WebSocket | null>(null); // Deepgram LiveClient uses WS internally, but we hold the client.
+    const keepAliveInterval = useRef<NodeJS.Timeout | null>(null);
+
+    const speakText = useCallback(async (text: string) => {
+        try {
+            const keyRes = await fetch('/api/deepgram');
+            const { key } = await keyRes.json();
+
+            const url = `https://api.deepgram.com/v1/speak?model=aura-asteria-en`;
+
+            // We want raw PCM 24kHz to match our player
+            // container=none, encoding=linear16, sample_rate=24000
+            const ttsUrl = `${url}&container=none&encoding=linear16&sample_rate=24000`;
+
+            const response = await fetch(ttsUrl, {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Token ${key}`,
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ text })
+            });
+
+            if (!response.ok) throw new Error("TTS Failed");
+
+            const audioBuffer = await response.arrayBuffer();
+            onAudioDelta(audioBuffer);
+
+        } catch (e) {
+            console.error("TTS Error:", e);
+        }
+    }, [onAudioDelta]);
+
+    const handleUserMessage = useCallback(async (text: string) => {
+        // 1. Update UI
+        addTranscriptItem('user', text);
+        fullTranscriptRef.current.push({ role: 'user', content: text });
+
+        // 2. Think (Groq)
+        setIsThinking(true);
+        try {
+            const aiResponseText = await generateVCResponse(fullTranscriptRef.current);
+
+            setIsThinking(false);
+
+            // 3. Update UI (Assistant)
+            addTranscriptItem('assistant', aiResponseText);
+            fullTranscriptRef.current.push({ role: 'assistant', content: aiResponseText });
+
+            // 4. Speak (Deepgram TTS)
+            setIsSpeaking(true);
+            await speakText(aiResponseText);
+            setIsSpeaking(false);
+
+        } catch (err) {
+            console.error("AI Logic Error:", err);
+            setIsThinking(false);
+        }
+    }, [onAudioDelta, speakText]);
 
     const connect = useCallback(async () => {
         try {
-            // 1. Get Ephemeral Token
-            const tokenRes = await fetch('/api/session', { method: 'POST' });
-            if (!tokenRes.ok) throw new Error('Failed to get token');
-            const data = await tokenRes.json();
-            const ephemeralKey = data.client_secret.value;
+            // 1. Get Ephemeral Key
+            const res = await fetch('/api/deepgram');
+            const { key } = await res.json();
 
-            // 2. Connect to WebSocket
-            const ws = new WebSocket(
-                'wss://api.openai.com/v1/realtime?model=gpt-4o-realtime-preview-2024-12-17',
-                ['realtime', `openai-insecure-api-key.${ephemeralKey}`, 'openai-beta.realtime-v1']
-            );
+            if (!key) throw new Error("No Deepgram key");
 
-            ws.onopen = () => {
-                console.log('Connected to OpenAI Realtime API');
+            // 2. Setup Deepgram Live Client (STT)
+            const deepgram = createClient(key);
+            const connection = deepgram.listen.live({
+                model: "nova-2",
+                language: "en-US",
+                smart_format: true,
+                interim_results: true,
+                endpointing: 300, // wait 300ms of silence to finalize
+                utterance_end_ms: 1000,
+            });
+
+            connection.on(LiveTranscriptionEvents.Open, () => {
+                // If connection changed, ignore
+                if (connectionRef.current !== connection) return;
+
+                console.log("Deepgram STT Connected");
                 setIsConnected(true);
-                // Configure Session with Tools
-                ws.send(JSON.stringify({
-                    type: 'session.update',
-                    session: {
-                        modalities: ['text', 'audio'],
-                        voice: 'verse',
-                        instructions: "You are 'Founder Voice', a ruthless Venture Capitalist. Your goal is to stress-test the founder. You interrupt frequently. If they claim they have no competitors, use the 'search_competitors' tool to find the truth and call them out. Be concise, aggressive, and data-driven.",
-                        turn_detection: {
-                            type: 'server_vad',
-                            threshold: 0.5,
-                            prefix_padding_ms: 300,
-                            silence_duration_ms: 500
-                        },
-                        tools: [
-                            {
-                                type: "function",
-                                name: "search_competitors",
-                                description: "Search for competitors or market data to fact-check the founder.",
-                                parameters: {
-                                    type: "object",
-                                    properties: {
-                                        query: {
-                                            type: "string",
-                                            description: "Search query, e.g. 'AI video editor competitors'"
-                                        }
-                                    },
-                                    required: ["query"]
-                                }
-                            }
-                        ],
-                        tool_choice: "auto",
-                    }
-                }));
-            };
 
-            ws.onmessage = async (event) => {
-                const message = JSON.parse(event.data);
-                await handleServerEvent(message, ws);
-            };
+                // Keep Alive
+                keepAliveInterval.current = setInterval(() => {
+                    connection.keepAlive();
+                }, 10000);
+            });
 
-            ws.onclose = () => {
-                console.log('Disconnected');
+            connection.on(LiveTranscriptionEvents.Close, () => {
+                // If connection changed, ignore (it means we manually disconnected/reconnected already)
+                if (connectionRef.current !== connection) return;
+
+                console.log("Deepgram STT Disconnected");
                 setIsConnected(false);
-                socketRef.current = null;
-            };
+                clearInterval(keepAliveInterval.current!);
+            });
 
-            socketRef.current = ws;
+            connection.on(LiveTranscriptionEvents.Transcript, async (data) => {
+                const sentence = data.channel.alternatives[0].transcript;
+                if (!sentence) return;
+
+                const isFinal = data.is_final;
+
+                // Logic: 
+                // We want to update the UI with interim results (user typing effect)
+                // But only send to Groq when the user pauses (is_final or utterance end)
+
+                if (isFinal && sentence.trim().length > 0) {
+                    // Add User line to transcript
+                    handleUserMessage(sentence);
+                }
+            });
+
+            connectionRef.current = connection;
 
         } catch (error) {
             console.error('Connection failed:', error);
         }
-    }, []);
+    }, [handleUserMessage]);
 
     const disconnect = useCallback(() => {
-        if (socketRef.current) {
-            socketRef.current.close();
-            socketRef.current = null;
+        if (connectionRef.current) {
+            connectionRef.current.requestClose();
+            connectionRef.current = null;
         }
+        if (keepAliveInterval.current) {
+            clearInterval(keepAliveInterval.current);
+        }
+        setIsConnected(false);
     }, []);
 
     const sendAudio = useCallback((base64Audio: string) => {
-        if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
-            socketRef.current.send(JSON.stringify({
-                type: 'input_audio_buffer.append',
-                audio: base64Audio
-            }));
+        // Deepgram Live Client expects raw Blob or Buffer.
+        // We receive Base64 from the recorder hook.
+        // Convert to Buffer/Blob
+        if (connectionRef.current && connectionRef.current.getReadyState() === 1) { // 1 = Open
+            const binary = atob(base64Audio);
+            const bytes = new Uint8Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i);
+            }
+            connectionRef.current.send(bytes.buffer);
         }
     }, []);
-
-    const handleServerEvent = async (event: any, ws: WebSocket) => {
-        switch (event.type) {
-            case 'response.created':
-                setIsThinking(true);
-                break;
-            case 'response.audio.delta':
-                setIsSpeaking(true);
-                onAudioDelta(event.delta);
-                break;
-            case 'response.audio_transcript.done':
-                addTranscriptItem('assistant', event.transcript);
-                break;
-            case 'conversation.item.input_audio_transcription.completed':
-                addTranscriptItem('user', event.transcript);
-                break;
-
-            // --- Tool Handling ---
-            case 'response.function_call_arguments.done':
-                const callId = event.call_id;
-                const name = event.name;
-                const args = JSON.parse(event.arguments);
-
-                if (name === 'search_competitors') {
-                    console.log(`Calling tool ${name} with`, args);
-                    const result = await searchTavily(args.query);
-
-                    // Send output back
-                    ws.send(JSON.stringify({
-                        type: 'conversation.item.create',
-                        item: {
-                            type: 'function_call_output',
-                            call_id: callId,
-                            output: result
-                        }
-                    }));
-
-                    // Trigger AI to respond to the tool output
-                    ws.send(JSON.stringify({
-                        type: 'response.create'
-                    }));
-                }
-                break;
-
-            case 'response.done':
-                setIsThinking(false);
-                setIsSpeaking(false);
-                break;
-
-            case 'input_audio_buffer.speech_started':
-                console.log('Interruption detected!');
-                onInterruption();
-                if (ws.readyState === WebSocket.OPEN) {
-                    ws.send(JSON.stringify({ type: 'response.cancel' }));
-                }
-                break;
-            default:
-                break;
-        }
-    };
 
     const addTranscriptItem = (role: 'user' | 'assistant', text: string) => {
         setTranscriptItems(prev => [
@@ -179,6 +180,11 @@ export const useRealtime = ({ onAudioDelta, onInterruption }: UseRealtimeProps) 
         ]);
     };
 
+    const clearTranscript = useCallback(() => {
+        setTranscriptItems([]);
+        fullTranscriptRef.current = [];
+    }, []);
+
     return {
         isConnected,
         isThinking,
@@ -186,6 +192,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption }: UseRealtimeProps) 
         connect,
         disconnect,
         sendAudio,
-        transcriptItems
+        transcriptItems,
+        clearTranscript
     };
 };

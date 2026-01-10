@@ -10,7 +10,7 @@ import { ReportCard, ReportData } from "@/components/war-room/ReportCard";
 import { useRealtime } from "@/hooks/use-realtime";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder";
 import { useAudioPlayer } from "@/hooks/use-audio-player";
-import { Mic, MicOff, Play, Square, Loader2 } from "lucide-react";
+import { Mic, MicOff, Play, Square, Loader2, RotateCcw } from "lucide-react";
 
 export default function PitchSessionPage() {
     const [sessionActive, setSessionActive] = useState(false);
@@ -24,6 +24,7 @@ export default function PitchSessionPage() {
         isConnected,
         sendAudio,
         transcriptItems,
+        clearTranscript,
         isSpeaking // AI Speaking status
     } = useRealtime({
         onAudioDelta: (delta) => addToQueue(delta),
@@ -41,6 +42,18 @@ export default function PitchSessionPage() {
         await connect();
         setSessionActive(true);
         // Give a small delay before recording starts or wait for connection
+    };
+
+    const handleResetSession = async () => {
+        // Stop Everything
+        stopRecording();
+        disconnect();
+        clearQueue();
+        clearTranscript();
+
+        // Return to Start Screen
+        setSessionActive(false);
+        setReportData(null);
     };
 
     const handleEndSession = async () => {
@@ -130,9 +143,14 @@ export default function PitchSessionPage() {
                                                     <Play className="w-4 h-4" /> START PITCH
                                                 </Button>
                                             ) : (
-                                                <Button onClick={handleEndSession} variant="destructive" size="lg" className="gap-2">
-                                                    <Square className="w-4 h-4" /> END SESSION
-                                                </Button>
+                                                <div className="flex gap-4">
+                                                    <Button onClick={handleResetSession} variant="outline" size="lg" className="gap-2 border-white/20 hover:bg-white/10">
+                                                        <RotateCcw className="w-4 h-4" /> RESET
+                                                    </Button>
+                                                    <Button onClick={handleEndSession} variant="destructive" size="lg" className="gap-2">
+                                                        <Square className="w-4 h-4" /> END SESSION
+                                                    </Button>
+                                                </div>
                                             )}
                                         </div>
                                     </>
