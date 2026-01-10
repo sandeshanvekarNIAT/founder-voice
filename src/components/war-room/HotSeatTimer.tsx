@@ -33,7 +33,8 @@ export function HotSeatTimer({ durationSeconds, isActive, onTimeEnd }: TimerProp
         }, 1000);
 
         return () => clearInterval(interval);
-    }, [isActive, timeLeft, onTimeEnd]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [isActive, onTimeEnd]);
 
     const minutes = Math.floor(timeLeft / 60);
     const seconds = timeLeft % 60;

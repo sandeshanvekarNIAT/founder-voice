@@ -19,7 +19,6 @@ export const useRealtime = ({ onAudioDelta, onInterruption }: UseRealtimeProps) 
     const fullTranscriptRef = useRef<{ role: string, content: string }[]>([]);
 
     const connectionRef = useRef<LiveClient | null>(null);
-    const socketRef = useRef<WebSocket | null>(null); // Deepgram LiveClient uses WS internally, but we hold the client.
     const keepAliveInterval = useRef<NodeJS.Timeout | null>(null);
 
     const speakText = useCallback(async (text: string) => {
@@ -77,7 +76,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption }: UseRealtimeProps) 
             console.error("AI Logic Error:", err);
             setIsThinking(false);
         }
-    }, [onAudioDelta, speakText]);
+    }, [speakText]);
 
     const connect = useCallback(async () => {
         try {
@@ -123,6 +122,11 @@ export const useRealtime = ({ onAudioDelta, onInterruption }: UseRealtimeProps) 
             connection.on(LiveTranscriptionEvents.Transcript, async (data) => {
                 const sentence = data.channel.alternatives[0].transcript;
                 if (!sentence) return;
+
+                // Interruption: If user starts speaking, stop AI audio
+                if (sentence.trim().length > 0) {
+                    onInterruption();
+                }
 
                 const isFinal = data.is_final;
 

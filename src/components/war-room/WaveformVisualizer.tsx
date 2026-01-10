@@ -62,6 +62,7 @@ export function WaveformVisualizer({ mode, audioStream }: WaveformProps) {
 
             // User Speaking (Frequency Bars)
             else if (mode === "user" && analyserRef.current && dataArrayRef.current) {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 analyserRef.current.getByteFrequencyData(dataArrayRef.current as any);
                 const barWidth = (width / dataArrayRef.current.length) * 2;
                 let x = 0;
