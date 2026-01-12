@@ -8,16 +8,23 @@ export const useAudioPlayer = () => {
     const nextStartTimeRef = useRef<number>(0);
     const queueRef = useRef<AudioBuffer[]>([]);
 
-    // Initialize AudioContext on user interaction (or first play)
-    const initAudioContext = useCallback(() => {
+    // Initialize AudioContext on user interaction
+    const initAudio = useCallback(async () => {
         if (!audioContextRef.current) {
             audioContextRef.current = new AudioContext({ sampleRate: SAMPLE_RATE });
         }
+        if (audioContextRef.current.state === 'suspended') {
+            await audioContextRef.current.resume();
+        }
+        console.log("AudioContext Initialized & Resumed:", audioContextRef.current.state);
     }, []);
 
     const addToQueue = useCallback((data: string | ArrayBuffer) => {
-        if (!audioContextRef.current) initAudioContext();
-        const ctx = audioContextRef.current!;
+        if (!audioContextRef.current) {
+            console.warn("AudioContext not initialized. Call initAudio() first.");
+            return;
+        }
+        const ctx = audioContextRef.current;
 
         let audioData: ArrayBuffer;
         if (typeof data === 'string') {
@@ -38,7 +45,7 @@ export const useAudioPlayer = () => {
         buffer.copyToChannel(float32Array, 0);
 
         playBuffer(buffer);
-    }, [initAudioContext]);
+    }, []);
 
     const playBuffer = (buffer: AudioBuffer) => {
         if (!audioContextRef.current) return;
@@ -59,8 +66,6 @@ export const useAudioPlayer = () => {
         setIsPlaying(true);
 
         source.onended = () => {
-            // Logic to determine if stopped playing?
-            // Simple check: if currentTime > nextStartTime, we are done
             if (ctx.currentTime >= nextStartTimeRef.current) {
                 setIsPlaying(false);
             }
@@ -68,20 +73,17 @@ export const useAudioPlayer = () => {
     };
 
     const clearQueue = useCallback(() => {
-        // We can't easily stop already scheduled nodes without keeping track of them.
-        // For "Barge-In", we usually just close the context or stop all sources.
-        // Re-creating context is the brute-force way to silence everything immediately.
         if (audioContextRef.current) {
             audioContextRef.current.close().then(() => {
                 audioContextRef.current = null;
                 nextStartTimeRef.current = 0;
                 setIsPlaying(false);
-                initAudioContext(); // Prepare for next
+                // Re-init doesn't need to be automatic here, let the UI trigger it if needed
             });
         }
-    }, [initAudioContext]);
+    }, []);
 
-    return { addToQueue, clearQueue, isPlaying };
+    return { initAudio, addToQueue, clearQueue, isPlaying };
 };
 
 function base64ToArrayBuffer(base64: string) {

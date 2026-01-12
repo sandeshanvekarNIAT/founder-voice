@@ -6,33 +6,42 @@ import { generateVCResponse } from '@/actions/groq';
 interface UseRealtimeProps {
     onAudioDelta: (audio: ArrayBuffer) => void;
     onInterruption: () => void;
+    onInterrogated?: (claim: string) => void; // Called when AI cuts in
+    deckContext: string | null;
 }
 
-export const useRealtime = ({ onAudioDelta, onInterruption }: UseRealtimeProps) => {
+export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deckContext }: UseRealtimeProps) => {
     const [isConnected, setIsConnected] = useState(false);
+    const [isConnecting, setIsConnecting] = useState(false);
+    const connectingRef = useRef(false); // Synchronous lock
     const [isThinking, setIsThinking] = useState(false);
     const [isSpeaking, setIsSpeaking] = useState(false);
     const [transcriptItems, setTranscriptItems] = useState<TranscriptItem[]>([]);
 
-    // We need to keep a clean history for Groq
-    // Using a ref because connection closures might stale closures in event listeners
-    const fullTranscriptRef = useRef<{ role: string, content: string }[]>([]);
-
     const connectionRef = useRef<LiveClient | null>(null);
     const keepAliveInterval = useRef<NodeJS.Timeout | null>(null);
+    const fullTranscriptRef = useRef<{ role: string, content: string }[]>([]);
+    const deepgramKeyRef = useRef<string | null>(null);
+
+    // Interrogation State
+    const lastInterruptionTimeRef = useRef<number>(0);
+    const interrogationCooldown = 20000; // 20 seconds (up from 15s)
+    const redFlags = ['no competitors', 'zero competition', 'everyone will buy', 'billion dollar', 'easy money', 'perfect product'];
+
+    // Logic Guard State
+    const lastLogicCheckTimeRef = useRef<number>(0);
+    const logicCheckInterval = 12000; // 12 seconds (up from 5s)
 
     const speakText = useCallback(async (text: string) => {
         try {
-            const keyRes = await fetch('/api/deepgram');
-            const { key } = await keyRes.json();
+            const key = deepgramKeyRef.current;
+            if (!key) {
+                console.log("TTS Ignored: Session disconnected or key cleared.");
+                return;
+            }
+            const url = `https://api.deepgram.com/v1/speak?model=aura-asteria-en&container=none&encoding=linear16&sample_rate=24000`;
 
-            const url = `https://api.deepgram.com/v1/speak?model=aura-asteria-en`;
-
-            // We want raw PCM 24kHz to match our player
-            // container=none, encoding=linear16, sample_rate=24000
-            const ttsUrl = `${url}&container=none&encoding=linear16&sample_rate=24000`;
-
-            const response = await fetch(ttsUrl, {
+            const response = await fetch(url, {
                 method: 'POST',
                 headers: {
                     'Authorization': `Token ${key}`,
@@ -51,118 +60,192 @@ export const useRealtime = ({ onAudioDelta, onInterruption }: UseRealtimeProps) 
         }
     }, [onAudioDelta]);
 
-    const handleUserMessage = useCallback(async (text: string) => {
-        // 1. Update UI
+    const handleUserMessage = useCallback(async (text: string, isInterruption = false) => {
+        // ALWAYS LOG, even if AI is busy
         addTranscriptItem('user', text);
         fullTranscriptRef.current.push({ role: 'user', content: text });
 
-        // 2. Think (Groq)
+        // Only prevent TRIGGERING a new response if busy
+        if (isThinking || isSpeaking) return;
+
         setIsThinking(true);
         try {
-            const aiResponseText = await generateVCResponse(fullTranscriptRef.current);
+            const processedText = isInterruption ? `[INTERRUPTING USER AT: "${text}"]` : text;
+            const lastMsg = fullTranscriptRef.current[fullTranscriptRef.current.length - 1];
+            if (lastMsg) lastMsg.content = processedText;
 
+            const aiResponseText = await generateVCResponse(fullTranscriptRef.current, deckContext);
             setIsThinking(false);
 
-            // 3. Update UI (Assistant)
             addTranscriptItem('assistant', aiResponseText);
             fullTranscriptRef.current.push({ role: 'assistant', content: aiResponseText });
 
-            // 4. Speak (Deepgram TTS)
             setIsSpeaking(true);
             await speakText(aiResponseText);
             setIsSpeaking(false);
-
         } catch (err) {
             console.error("AI Logic Error:", err);
             setIsThinking(false);
+            setIsSpeaking(false);
         }
-    }, [speakText]);
+    }, [speakText, deckContext, isThinking, isSpeaking]);
 
     const connect = useCallback(async () => {
+        if (connectingRef.current || isConnected) {
+            console.log("Connection attempt ignored: already connecting or connected.");
+            return;
+        }
+
+        // Synchronous Lock
+        connectingRef.current = true;
+        setIsConnecting(true);
+
+        // Cleanup any existing connection/interval synchronously
+        if (connectionRef.current) {
+            console.log("Cleaning up existing connection before reconnecting...");
+            connectionRef.current.finish();
+            connectionRef.current = null;
+        }
+        if (keepAliveInterval.current) {
+            clearInterval(keepAliveInterval.current);
+            keepAliveInterval.current = null;
+        }
+
         try {
-            // 1. Get Ephemeral Key
             const res = await fetch('/api/deepgram');
             const { key } = await res.json();
-
             if (!key) throw new Error("No Deepgram key");
+            deepgramKeyRef.current = key;
 
-            // 2. Setup Deepgram Live Client (STT)
             const deepgram = createClient(key);
             const connection = deepgram.listen.live({
                 model: "nova-2",
                 language: "en-US",
                 smart_format: true,
                 interim_results: true,
-                endpointing: 300, // wait 300ms of silence to finalize
-                utterance_end_ms: 1000,
+                encoding: "linear16",
+                sample_rate: 24000, // Explicitly match AUDIO_SAMPLE_RATE
+                endpointing: 1000, // Wait 1s instead of 0.3s
+                utterance_end_ms: 1500, // Added safety buffer for finality
             });
 
-            connection.on(LiveTranscriptionEvents.Open, () => {
-                // If connection changed, ignore
-                if (connectionRef.current !== connection) return;
+            // CRITICAL: Set immediately so handlers refer to the correct instance
+            connectionRef.current = connection;
 
+            connection.on(LiveTranscriptionEvents.Open, () => {
+                if (connectionRef.current !== connection) {
+                    connection.finish();
+                    return;
+                }
                 console.log("Deepgram STT Connected");
                 setIsConnected(true);
+                setIsConnecting(false);
+                connectingRef.current = false;
 
-                // Keep Alive
                 keepAliveInterval.current = setInterval(() => {
-                    connection.keepAlive();
+                    if (connection.getReadyState() === 1) {
+                        connection.keepAlive();
+                    }
                 }, 10000);
             });
 
             connection.on(LiveTranscriptionEvents.Close, () => {
-                // If connection changed, ignore (it means we manually disconnected/reconnected already)
-                if (connectionRef.current !== connection) return;
+                if (connectionRef.current === connection) {
+                    console.log("Deepgram STT Disconnected (Self)");
+                    setIsConnected(false);
+                    setIsConnecting(false);
+                    connectingRef.current = false;
+                    connectionRef.current = null;
+                    if (keepAliveInterval.current) {
+                        clearInterval(keepAliveInterval.current);
+                        keepAliveInterval.current = null;
+                    }
+                }
+            });
 
-                console.log("Deepgram STT Disconnected");
-                setIsConnected(false);
-                clearInterval(keepAliveInterval.current!);
+            connection.on(LiveTranscriptionEvents.Error, (err) => {
+                console.error("Deepgram Error:", err);
+                if (connectionRef.current === connection) {
+                    setIsConnecting(false);
+                    connectingRef.current = false;
+                    setIsConnected(false);
+                }
             });
 
             connection.on(LiveTranscriptionEvents.Transcript, async (data) => {
                 const sentence = data.channel.alternatives[0].transcript;
                 if (!sentence) return;
 
-                // Interruption: If user starts speaking, stop AI audio
                 if (sentence.trim().length > 0) {
                     onInterruption();
                 }
 
-                const isFinal = data.is_final;
+                const now = Date.now();
+                const canInterrupt = now - lastInterruptionTimeRef.current > interrogationCooldown;
 
-                // Logic: 
-                // We want to update the UI with interim results (user typing effect)
-                // But only send to Groq when the user pauses (is_final or utterance end)
+                if (!data.is_final && canInterrupt && !isThinking && !isSpeaking) {
+                    const lowerSentence = sentence.toLowerCase();
+                    const hasRedFlag = redFlags.find(flag => lowerSentence.includes(flag));
+                    const isTooLong = sentence.split(' ').length > 50; // Increased from 25
 
-                if (isFinal && sentence.trim().length > 0) {
-                    // Add User line to transcript
+                    if (hasRedFlag || isTooLong) {
+                        lastInterruptionTimeRef.current = now;
+                        if (onInterrogated) onInterrogated(hasRedFlag || "Vague Pitching");
+                        handleUserMessage(sentence, true);
+                        return;
+                    }
+                }
+
+                if (!data.is_final && canInterrupt && !isThinking && !isSpeaking && deckContext) {
+                    const timeSinceLastCheck = now - lastLogicCheckTimeRef.current;
+                    if (timeSinceLastCheck > logicCheckInterval && sentence.split(' ').length > 20) { // Increased from 10
+                        lastLogicCheckTimeRef.current = now;
+                        fetch('/api/check-logic', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ transcript: sentence, deckContext })
+                        })
+                            .then(res => res.json())
+                            .then(result => {
+                                if (result.shouldInterrupt) {
+                                    lastInterruptionTimeRef.current = Date.now();
+                                    if (onInterrogated) onInterrogated(result.reason);
+                                    handleUserMessage(sentence, true);
+                                }
+                            })
+                            .catch(err => console.error("Logic Guard check failed:", err));
+                    }
+                }
+
+                if (data.is_final && sentence.trim().length > 0) {
                     handleUserMessage(sentence);
                 }
             });
 
-            connectionRef.current = connection;
-
         } catch (error) {
             console.error('Connection failed:', error);
+            setIsConnecting(false);
+            connectingRef.current = false;
         }
-    }, [handleUserMessage]);
+    }, [handleUserMessage, onInterruption, onInterrogated, isThinking, isSpeaking, isConnected, deckContext]);
 
     const disconnect = useCallback(() => {
         if (connectionRef.current) {
-            connectionRef.current.requestClose();
+            connectionRef.current.finish();
             connectionRef.current = null;
         }
         if (keepAliveInterval.current) {
             clearInterval(keepAliveInterval.current);
+            keepAliveInterval.current = null;
         }
         setIsConnected(false);
+        setIsConnecting(false);
+        connectingRef.current = false;
+        deepgramKeyRef.current = null;
     }, []);
 
     const sendAudio = useCallback((base64Audio: string) => {
-        // Deepgram Live Client expects raw Blob or Buffer.
-        // We receive Base64 from the recorder hook.
-        // Convert to Buffer/Blob
-        if (connectionRef.current && connectionRef.current.getReadyState() === 1) { // 1 = Open
+        if (connectionRef.current && connectionRef.current.getReadyState() === 1) {
             const binary = atob(base64Audio);
             const bytes = new Uint8Array(binary.length);
             for (let i = 0; i < binary.length; i++) {
@@ -176,7 +259,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption }: UseRealtimeProps) 
         setTranscriptItems(prev => [
             ...prev,
             {
-                id: Math.random().toString(36).substring(7),
+                id: crypto.randomUUID(),
                 role,
                 text,
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
@@ -191,6 +274,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption }: UseRealtimeProps) 
 
     return {
         isConnected,
+        isConnecting,
         isThinking,
         isSpeaking,
         connect,

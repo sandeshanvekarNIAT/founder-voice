@@ -2,33 +2,35 @@
 
 import Groq from "groq-sdk";
 import { searchTavily } from "./tavily";
+import { VC_SYSTEM_PROMPT, getDeckContextPrompt } from "@/lib/prompts";
 
 const groq = new Groq({
     apiKey: process.env.GROQ_API_KEY,
 });
 
-export async function generateVCResponse(transcript: { role: string; content: string }[]) {
+// Define type for transcript items
+interface TranscriptItem {
+    role: string;
+    content: string;
+}
+
+export async function generateVCResponse(transcript: TranscriptItem[], deckContext: string | null = null) {
     if (!process.env.GROQ_API_KEY) {
-        throw new Error("GROQ_API_KEY is not set");
+        return "System Error: Groq API Key missing.";
     }
 
     // System Prompt for the VC Persona
-    const systemPrompt = `
-You are 'Founder Voice', a ruthless, impatient Venture Capitalist.
-Your goal is to stress-test the founder.
-You interrupt frequently.
-Be concise (max 1-2 sentences).
-Be aggressive and data-driven.
-If the founder makes a wild claim, call it out.
+    let systemPrompt = VC_SYSTEM_PROMPT;
 
-AVAILABLE TOOLS:
-[SEARCH_COMPETITORS]: specific_query
-(If you need to fact check competitors, output ONLY this token followed by the query)
+    if (deckContext) {
+        systemPrompt += getDeckContextPrompt(deckContext);
+    }
 
-Example:
-Founder: "We have no competitors."
-You: "[SEARCH_COMPETITORS]: AI video editing competitors"
-`;
+    systemPrompt += `
+        Example:
+        Founder: "We have no competitors."
+        You: "[SEARCH_COMPETITORS]: AI video editing competitors"
+        `;
 
     // Flatten transcript for Llama 3
     const messages = [
@@ -42,16 +44,17 @@ You: "[SEARCH_COMPETITORS]: AI video editing competitors"
     try {
         const completion = await groq.chat.completions.create({
             messages: messages as any,
-            model: "llama-3.1-70b-versatile",
+            model: "llama-3.3-70b-versatile",
             temperature: 0.7,
             max_tokens: 150,
         });
 
         const responseText = completion.choices[0]?.message?.content || "";
 
-        // Check for Tool Use
-        if (responseText.includes("[SEARCH_COMPETITORS]:")) {
-            const query = responseText.split("[SEARCH_COMPETITORS]:")[1].trim();
+        // Improved Tool Use Extraction
+        const toolMatch = responseText.match(/\[SEARCH_COMPETITORS\]:\s*(.*)/);
+        if (toolMatch) {
+            const query = toolMatch[1].trim();
             console.log("VC requesting search:", query);
 
             // Perform the search (Server-side)
@@ -61,12 +64,12 @@ You: "[SEARCH_COMPETITORS]: AI video editing competitors"
             const toolMessages = [
                 ...messages,
                 { role: "assistant", content: responseText },
-                { role: "user", content: `Tool Output: ${searchResult}. Now respond to the founder based on this data.` }
+                { role: "user", content: `Tool Output: ${searchResult}. Now respond to the founder based on this data. Be brief and punchy.` }
             ];
 
             const toolCompletion = await groq.chat.completions.create({
                 messages: toolMessages as any,
-                model: "llama-3.1-70b-versatile",
+                model: "llama-3.3-70b-versatile",
                 temperature: 0.7,
                 max_tokens: 150,
             });

@@ -1,85 +1,144 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { HotSeatTimer } from "@/components/war-room/HotSeatTimer";
 import { LiveTranscript } from "@/components/war-room/LiveTranscript";
 import { WaveformVisualizer } from "@/components/war-room/WaveformVisualizer";
 import { ReportCard, ReportData } from "@/components/war-room/ReportCard";
+import { DeckUploader } from "@/components/war-room/DeckUploader";
+import { InterrogationAlert } from "@/components/war-room/InterrogationAlert";
 import { useRealtime } from "@/hooks/use-realtime";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder";
 import { useAudioPlayer } from "@/hooks/use-audio-player";
-import { Mic, MicOff, Play, Square, Loader2, RotateCcw } from "lucide-react";
+import Link from "next/link";
+import { Mic, MicOff, Play, Square, Loader2, RotateCcw, ArrowLeft } from "lucide-react";
+
+type SessionStatus = 'IDLE' | 'PITCHING' | 'ANALYZING' | 'COMPLETED' | 'ERROR';
 
 export default function PitchSessionPage() {
-    const [sessionActive, setSessionActive] = useState(false);
-    const [isGeneratingReport, setIsGeneratingReport] = useState(false);
+    const [status, setStatus] = useState<SessionStatus>('IDLE');
     const [reportData, setReportData] = useState<ReportData | null>(null);
-    const { addToQueue, clearQueue, isPlaying } = useAudioPlayer();
+    const [deckContext, setDeckContext] = useState<string | null>(null);
+    const [activeClaim, setActiveClaim] = useState<string | null>(null);
+    const { initAudio, addToQueue, clearQueue, isPlaying } = useAudioPlayer();
+
+    const handleAudioDelta = useCallback((delta: ArrayBuffer) => {
+        addToQueue(delta);
+    }, [addToQueue]);
+
+    const handleInterruption = useCallback(() => {
+        clearQueue();
+    }, [clearQueue]);
+
+    const handleInterrogated = useCallback((claim: string) => {
+        setActiveClaim(claim);
+    }, []);
 
     const {
         connect,
         disconnect,
         isConnected,
+        isConnecting,
         sendAudio,
         transcriptItems,
         clearTranscript,
         isSpeaking // AI Speaking status
     } = useRealtime({
-        onAudioDelta: (delta) => addToQueue(delta),
-        onInterruption: () => clearQueue()
+        onAudioDelta: handleAudioDelta,
+        onInterruption: handleInterruption,
+        onInterrogated: handleInterrogated,
+        deckContext
     });
 
-    const { startRecording, stopRecording, isRecording, stream } = useAudioRecorder((base64) => {
+    const handleRecordingData = useCallback((base64: string) => {
         if (isConnected) {
             sendAudio(base64);
         }
-    });
+    }, [isConnected, sendAudio]);
 
-    const handleStartSession = async () => {
+    const { startRecording, stopRecording, isRecording, stream } = useAudioRecorder(handleRecordingData);
+
+    const handleStartSession = useCallback(async () => {
         setReportData(null);
+        await initAudio(); // Activate browser audio engine
         await connect();
-        setSessionActive(true);
-        // Give a small delay before recording starts or wait for connection
-    };
+        setStatus('PITCHING');
+    }, [initAudio, connect]);
 
-    const handleResetSession = async () => {
-        // Stop Everything
+    const handleResetSession = useCallback(async () => {
         stopRecording();
         disconnect();
         clearQueue();
         clearTranscript();
-
-        // Return to Start Screen
-        setSessionActive(false);
+        setStatus('IDLE');
         setReportData(null);
-    };
+        setDeckContext(null);
+    }, [stopRecording, disconnect, clearQueue, clearTranscript]);
 
-    const handleEndSession = async () => {
-        setSessionActive(false);
-        disconnect();
+    const handleEndSession = useCallback(async () => {
+        if (status !== 'PITCHING') return;
+
+        // 1. Stop Recording First to trigger last transcripts
         stopRecording();
+
+        // 2. Short delay to "flush" the transcript queue from Deepgram
+        setStatus('ANALYZING');
+        await new Promise(resolve => setTimeout(resolve, 1500));
+
+        // 3. Disconnect Deepgram
+        disconnect();
         clearQueue();
 
-        // Generate Report
-        if (transcriptItems.length > 0) {
-            setIsGeneratingReport(true);
-            try {
-                const res = await fetch('/api/report', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ transcript: transcriptItems })
-                });
-                const data = await res.json();
-                setReportData(data);
-            } catch (e) {
-                console.error(e);
-            } finally {
-                setIsGeneratingReport(false);
-            }
+        // 4. Check if we have enough data
+        if (transcriptItems.length < 2) {
+            setReportData({
+                scores: { market: 0, tech: 0, economics: 0, readiness: 0 },
+                summary: "Session was too short to generate a report. You need to actually say something!",
+                key_risks: ["Insufficient verbal data capture"],
+                coachability_delta: "Unknown"
+            });
+            setStatus('COMPLETED');
+            return;
         }
-    };
+
+        // 5. Generate Report
+        try {
+            const res = await fetch('/api/report', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    transcript: transcriptItems,
+                    deckContext // Pass context for better analysis
+                })
+            });
+
+            if (!res.ok) {
+                const text = await res.text().catch(() => "{}");
+                let errorDetails = { error: "Report API failed" };
+                try {
+                    const parsed = JSON.parse(text);
+                    if (parsed.error) errorDetails.error = parsed.error;
+                } catch (e) { }
+
+                throw new Error(errorDetails.error);
+            }
+
+            const data = await res.json();
+            setReportData(data);
+            setStatus('COMPLETED');
+        } catch (e: any) {
+            console.error("Report Error:", e);
+            setReportData({
+                scores: { market: 0, tech: 0, economics: 0, readiness: 0 },
+                summary: `The VC could not generate a report. ${e.message || "Internal Server Error"}`,
+                key_risks: ["System failure during analysis"],
+                coachability_delta: "Medium"
+            });
+            setStatus('ERROR');
+        }
+    }, [status, stopRecording, disconnect, clearQueue, transcriptItems, deckContext]);
 
     // Auto-start recording when connected
     useEffect(() => {
@@ -93,9 +152,14 @@ export default function PitchSessionPage() {
 
             {/* Header / Status Bar */}
             <div className="flex justify-between items-center border-b border-white/10 pb-4">
-                <div>
-                    <h1 className="text-2xl font-bold tracking-tight">FOUNDER INTERROGATION PROTOCOL</h1>
-                    <p className="text-muted-foreground text-sm font-mono">MODE: AGGRESSIVE_VC // LATENCY: LOW</p>
+                <div className="flex items-center gap-4">
+                    <Link href="/" className="p-2 -ml-2 hover:bg-white/5 rounded-full transition-colors text-muted-foreground hover:text-white">
+                        <ArrowLeft className="w-5 h-5" />
+                    </Link>
+                    <div>
+                        <h1 className="text-2xl font-bold tracking-tight">FOUNDER INTERROGATION PROTOCOL</h1>
+                        <p className="text-muted-foreground text-sm font-mono">MODE: AGGRESSIVE_VC // LATENCY: LOW</p>
+                    </div>
                 </div>
                 <div className="flex items-center gap-4">
                     <div className={`h-3 w-3 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
@@ -121,7 +185,7 @@ export default function PitchSessionPage() {
                         <>
                             {/* Timer & Controls */}
                             <Card className="p-6 bg-card border-white/10 flex flex-col items-center justify-center gap-6 min-h-[200px]">
-                                {isGeneratingReport ? (
+                                {status === 'ANALYZING' ? (
                                     <div className="flex flex-col items-center gap-4 animate-pulse">
                                         <Loader2 className="w-12 h-12 animate-spin text-primary" />
                                         <div className="text-center">
@@ -133,15 +197,32 @@ export default function PitchSessionPage() {
                                     <>
                                         <HotSeatTimer
                                             durationSeconds={180}
-                                            isActive={sessionActive}
+                                            isActive={status === 'PITCHING'}
                                             onTimeEnd={handleEndSession}
                                         />
 
                                         <div className="flex gap-4">
-                                            {!sessionActive ? (
-                                                <Button onClick={handleStartSession} size="lg" className="bg-primary hover:bg-primary/90 text-white gap-2">
-                                                    <Play className="w-4 h-4" /> START PITCH
-                                                </Button>
+                                            {status === 'IDLE' ? (
+                                                <div className="flex flex-col gap-4 w-full max-w-sm">
+                                                    <DeckUploader onDeckLoaded={setDeckContext} />
+                                                    <Button
+                                                        onClick={handleStartSession}
+                                                        size="lg"
+                                                        disabled={isConnecting}
+                                                        className="bg-primary hover:bg-primary/90 text-white gap-2 w-full"
+                                                    >
+                                                        {isConnecting ? (
+                                                            <>
+                                                                <Loader2 className="w-4 h-4 animate-spin" />
+                                                                CONNECTING...
+                                                            </>
+                                                        ) : (
+                                                            <>
+                                                                <Play className="w-4 h-4" /> START PITCH
+                                                            </>
+                                                        )}
+                                                    </Button>
+                                                </div>
                                             ) : (
                                                 <div className="flex gap-4">
                                                     <Button onClick={handleResetSession} variant="outline" size="lg" className="gap-2 border-white/20 hover:bg-white/10">
@@ -160,13 +241,17 @@ export default function PitchSessionPage() {
                             {/* Waveform Visualizer */}
                             <Card className="flex-1 bg-black/50 border-white/10 relative overflow-hidden flex items-center justify-center min-h-[300px]">
                                 <WaveformVisualizer
-                                    mode={isSpeaking ? 'agent' : (isRecording ? 'user' : 'listening')}
+                                    mode={
+                                        activeClaim ? 'interrogated' :
+                                            isSpeaking ? 'agent' :
+                                                (isRecording ? 'user' : 'listening')
+                                    }
                                     audioStream={stream}
                                 />
 
                                 {/* Status Overlay */}
                                 <div className="absolute top-4 right-4 font-mono text-xs text-muted-foreground">
-                                    {isSpeaking ? 'AI_SPEAKING' : (isRecording ? 'LISTENING...' : 'IDLE')}
+                                    {activeClaim ? 'INTERROGATING_CLAIM' : (isSpeaking ? 'AI_SPEAKING' : (isRecording ? 'LISTENING...' : 'IDLE'))}
                                 </div>
                             </Card>
                         </>
@@ -178,6 +263,12 @@ export default function PitchSessionPage() {
                     <LiveTranscript items={transcriptItems} />
                 </div>
             </div>
+
+            {/* AI Interrogation Alert */}
+            <InterrogationAlert
+                claim={activeClaim}
+                onClose={() => setActiveClaim(null)}
+            />
         </div>
     );
 }

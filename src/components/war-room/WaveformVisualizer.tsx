@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 
-type VisualizerMode = "agent" | "user" | "listening";
+type VisualizerMode = "agent" | "user" | "listening" | "interrogated";
 
 interface WaveformProps {
     mode: VisualizerMode;
@@ -74,6 +74,25 @@ export function WaveformVisualizer({ mode, audioStream }: WaveformProps) {
                     ctx.fillRect(x, height / 2 - barHeight / 2, barWidth - 2, barHeight);
                     x += barWidth;
                 }
+            }
+
+            // INTERROGATED (Red Flatline/Jitter)
+            else if (mode === "interrogated") {
+                ctx.beginPath();
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = "#ef4444"; // Red 500
+                ctx.shadowBlur = 10;
+                ctx.shadowColor = "#ef4444";
+
+                for (let x = 0; x < width; x++) {
+                    // Jittery horizontal line
+                    const jitter = (Math.random() - 0.5) * 4;
+                    const y = height / 2 + jitter;
+                    if (x === 0) ctx.moveTo(x, y);
+                    else ctx.lineTo(x, y);
+                }
+                ctx.stroke();
+                ctx.shadowBlur = 0; // Reset
             }
 
             // Passive Listening (Subtle Pulse)

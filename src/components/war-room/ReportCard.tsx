@@ -39,33 +39,47 @@ export interface ReportData {
 }
 
 export function ReportCard({ data }: { data: ReportData }) {
+    if (!data) return null;
+
+    const scores = data.scores || {
+        market: 0,
+        tech: 0,
+        economics: 0,
+        readiness: 0
+    };
+
+    const risks = Array.isArray(data.key_risks) ? data.key_risks : [];
+    const coachability = data.coachability_delta || "Unknown";
+
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 animate-in fade-in zoom-in-95 duration-500">
 
             {/* Scores */}
             <div className="grid grid-cols-2 gap-4">
-                <ScoreMetric label="Market Clarity" score={data.scores.market} color="bg-chart-1" />
-                <ScoreMetric label="Tech Defensibility" score={data.scores.tech} color="bg-chart-2" />
-                <ScoreMetric label="Unit Economics" score={data.scores.economics} color="bg-chart-3" />
-                <ScoreMetric label="Investor Readiness" score={data.scores.readiness} color="bg-chart-4" />
+                <ScoreMetric label="Market Clarity" score={scores.market} color="bg-chart-1" />
+                <ScoreMetric label="Tech Defensibility" score={scores.tech} color="bg-chart-2" />
+                <ScoreMetric label="Unit Economics" score={scores.economics} color="bg-chart-3" />
+                <ScoreMetric label="Investor Readiness" score={scores.readiness} color="bg-chart-4" />
             </div>
 
             {/* Analysis */}
             <div className="flex flex-col gap-4">
                 <Card className="p-4 bg-white/5 border-white/10">
                     <h3 className="text-sm font-bold uppercase tracking-wider text-muted-foreground mb-2">VC Summary</h3>
-                    <p className="text-sm leading-relaxed">{data.summary}</p>
+                    <p className="text-sm leading-relaxed">{data.summary || "No summary available."}</p>
                 </Card>
 
                 <Card className="p-4 bg-white/5 border-white/10 flex-1">
                     <h3 className="text-sm font-bold uppercase tracking-wider text-destructive mb-2">Key Risks</h3>
                     <ul className="space-y-2">
-                        {data.key_risks.map((risk, i) => (
+                        {risks.length > 0 ? risks.map((risk, i) => (
                             <li key={i} className="text-sm flex gap-2 items-start">
                                 <span className="text-destructive font-mono">[{i + 1}]</span>
                                 {risk}
                             </li>
-                        ))}
+                        )) : (
+                            <li className="text-sm text-muted-foreground italic">No critical risks identified.</li>
+                        )}
                     </ul>
                 </Card>
 
@@ -73,10 +87,10 @@ export function ReportCard({ data }: { data: ReportData }) {
                     <span className="text-xs uppercase text-muted-foreground">Coachability Delta</span>
                     <span className={cn(
                         "font-bold font-mono",
-                        data.coachability_delta === 'High' ? 'text-green-500' :
-                            data.coachability_delta === 'Low' ? 'text-red-500' : 'text-yellow-500'
+                        coachability === 'High' ? 'text-green-500' :
+                            coachability === 'Low' ? 'text-red-500' : 'text-yellow-500'
                     )}>
-                        {data.coachability_delta.toUpperCase()}
+                        {coachability.toUpperCase()}
                     </span>
                 </div>
             </div>

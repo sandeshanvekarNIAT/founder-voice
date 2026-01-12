@@ -9,6 +9,14 @@ create table public.profiles (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- PITCH DECKS (Uploaded context)
+create table public.pitch_decks (
+  id uuid default uuid_generate_v4() primary key,
+  file_name text not null,
+  file_content text not null, -- The extracted text from the PDF
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+
 -- SESSIONS (Pitch Sessions)
 create table public.sessions (
   id uuid default uuid_generate_v4() primary key,
@@ -24,12 +32,22 @@ create table public.sessions (
 -- RLS POLICIES (Security)
 alter table public.profiles enable row level security;
 alter table public.sessions enable row level security;
+alter table public.pitch_decks enable row level security;
 
+-- Profiles: Users can view own profile
 create policy "Users can view own profile" on public.profiles
   for select using (auth.uid() = id);
 
+-- Sessions: Users can insert/view own sessions
 create policy "Users can insert own sessions" on public.sessions
   for insert with check (auth.uid() = user_id);
 
 create policy "Users can view own sessions" on public.sessions
   for select using (auth.uid() = user_id);
+
+-- Pitch Decks: Public insert/read for demo
+create policy "Enable public insert access" on public.pitch_decks
+  for insert with check (true);
+
+create policy "Enable public read access" on public.pitch_decks
+  for select using (true);

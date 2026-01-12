@@ -1,22 +1,31 @@
 import { NextResponse } from "next/server";
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import Groq from "groq-sdk";
 
 export const maxDuration = 60;
 
 export async function POST(req: Request) {
+    console.log(">>> REPORT API: START");
     try {
-        const { transcript } = await req.json();
+        const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 
-        if (!transcript || !Array.isArray(transcript)) {
+        const body = await req.json().catch(e => {
+            console.error(">>> REPORT API: JSON Parse Error", e);
+            return null;
+        });
+
+        if (!body || !body.transcript || !Array.isArray(body.transcript)) {
+            console.warn(">>> REPORT API: INVALID TRANSCRIPT (Not an array or missing)");
             return NextResponse.json({ error: "Invalid transcript" }, { status: 400 });
         }
 
-        if (!process.env.GOOGLE_API_KEY) {
-            return NextResponse.json({ error: "GOOGLE_API_KEY missing" }, { status: 500 });
-        }
+        const { transcript, deckContext } = body;
+        console.log(`>>> REPORT API: TRANSCRIPT RECEIVED (${transcript.length} items)`);
 
-        const genAI = new GoogleGenerativeAI(process.env.GOOGLE_API_KEY);
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        if (!process.env.GROQ_API_KEY) {
+            console.error(">>> REPORT API: GROQ_API_KEY MISSING");
+            return NextResponse.json({ error: "GROQ_API_KEY missing" }, { status: 500 });
+        }
+        console.log(">>> REPORT API: GROQ_API_KEY FOUND");
 
         // Format transcript
         const conversationText = transcript
@@ -27,6 +36,9 @@ export async function POST(req: Request) {
 You are a ruthless, data-driven Venture Capitalist. 
 Analyze the following pitch transcript and generate a "Fundability Report Card".
 
+${deckContext ? `PITCH DECK CONTEXT (Reference this for contradictions or missing info):
+${deckContext}` : "No deck provided."}
+
 SCORECARD CRITERIA:
 1. Market Clarity (0-100): Clear TAM/SAM/SOM? Competitor awareness?
 2. Tech Defensibility (0-100): Is it a wrapper or real IP?
@@ -36,7 +48,10 @@ SCORECARD CRITERIA:
 TRANSCRIPT:
 ${conversationText}
 
-OUTPUT FORMAT (JSON ONLY, NO MARKDOWN):
+TASK:
+Judge the founder based on the transcript. If a deck was provided, highlight any contradictions between what they said and what the deck claims. 
+
+OUTPUT FORMAT (JSON ONLY, NO MARKDOWN, NO EXPLANATION BEFORE OR AFTER):
 {
   "scores": {
     "market": 0,
@@ -50,25 +65,58 @@ OUTPUT FORMAT (JSON ONLY, NO MARKDOWN):
 }
 `;
 
-        const result = await model.generateContent(prompt);
-        const response = result.response;
-        const text = response.text();
+        const completion = await groq.chat.completions.create({
+            messages: [{ role: "user", content: prompt }],
+            model: "llama-3.3-70b-versatile",
+            temperature: 0.1, // Low temp for more consistent JSON
+        });
 
-        // Clean up markdown if Gemini adds it
+        const text = completion.choices[0]?.message?.content || "";
+        console.log(`>>> REPORT API: GROQ RESPONSE RECEIVED (${text.length} chars)`);
+
+        // Clean up markdown if LLM adds it
         const cleanJson = text.replace(/```json/g, "").replace(/```/g, "").trim();
 
         try {
             const data = JSON.parse(cleanJson);
-            return NextResponse.json(data);
-        } catch (e) {
-            console.error("JSON Parse Error:", text);
-            return NextResponse.json({ error: "Failed to parse report" }, { status: 500 });
+            console.log(">>> REPORT API: JSON PARSE SUCCESSFUL");
+
+            // Validate Schema
+            const validatedData = {
+                scores: {
+                    market: Number(data.scores?.market) || 0,
+                    tech: Number(data.scores?.tech) || 0,
+                    economics: Number(data.scores?.economics) || 0,
+                    readiness: Number(data.scores?.readiness) || 0,
+                },
+                summary: String(data.summary || "Summary generation failed."),
+                key_risks: Array.isArray(data.key_risks) ? data.key_risks : [],
+                coachability_delta: String(data.coachability_delta || "Medium")
+            };
+
+            return NextResponse.json(validatedData);
+        } catch (e: any) {
+            console.error(`>>> REPORT API: JSON PARSE ERROR: ${e.message}`);
+            console.error(`>>> REPORT API: RAW LLM OUTPUT: ${text}`);
+            // Return a "Graceful Failure" report instead of 500
+            return NextResponse.json({
+                scores: { market: 0, tech: 0, economics: 0, readiness: 0 },
+                summary: "The VC was unable to generate a coherent report. You likely didn't provide enough data.",
+                key_risks: ["Insufficient data for analysis"],
+                coachability_delta: "Medium"
+            });
         }
 
-    } catch (error) {
-        console.error("Report Generation Error:", error);
+    } catch (error: any) {
+        console.error(`>>> REPORT API: CRITICAL ERROR - ${error.message}`);
+        if (error.stack) console.error(error.stack);
+
         return NextResponse.json(
-            { error: "Failed to generate report" },
+            {
+                error: "Failed to generate report",
+                details: error.message,
+                stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+            },
             { status: 500 }
         );
     }

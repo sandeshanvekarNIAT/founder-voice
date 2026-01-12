@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { cn } from "@/lib/utils";
 
 interface TimerProps {
@@ -12,29 +12,36 @@ interface TimerProps {
 export function HotSeatTimer({ durationSeconds, isActive, onTimeEnd }: TimerProps) {
     const [timeLeft, setTimeLeft] = useState(durationSeconds);
 
+    const onTimeEndRef = useRef(onTimeEnd);
+
+    // Keep the ref updated with the latest callback
+    useEffect(() => {
+        onTimeEndRef.current = onTimeEnd;
+    }, [onTimeEnd]);
+
     useEffect(() => {
         if (!isActive) {
             setTimeLeft(durationSeconds);
         }
     }, [isActive, durationSeconds]);
 
+    // Effect for the countdown
     useEffect(() => {
         if (!isActive || timeLeft <= 0) return;
 
         const interval = setInterval(() => {
-            setTimeLeft((prev) => {
-                if (prev <= 1) {
-                    clearInterval(interval);
-                    onTimeEnd?.();
-                    return 0;
-                }
-                return prev - 1;
-            });
+            setTimeLeft((prev) => Math.max(0, prev - 1));
         }, 1000);
 
         return () => clearInterval(interval);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isActive, onTimeEnd]);
+    }, [isActive, timeLeft]);
+
+    // Dedicated effect to trigger completion - fixes "update while rendering" error
+    useEffect(() => {
+        if (timeLeft === 0 && isActive) {
+            onTimeEndRef.current?.();
+        }
+    }, [timeLeft, isActive]);
 
     const minutes = Math.floor(timeLeft / 60);
     const seconds = timeLeft % 60;
