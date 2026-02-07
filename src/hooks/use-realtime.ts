@@ -144,11 +144,11 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
             let utteranceEndMs = 1500;
 
             if (voiceMode === 'patient') {
-                endpointing = 2000; // Wait 2s for silence
-                utteranceEndMs = 3000; // Wait 3s before finalizing
+                endpointing = 3000; // Wait 3s for silence (Increased)
+                utteranceEndMs = 5000; // Wait 5s before finalizing (Increased)
             } else if (voiceMode === 'dynamic') {
                 endpointing = 1500;
-                utteranceEndMs = 2000;
+                utteranceEndMs = 2500; // Increased slightly
             } else if (voiceMode === 'manual') {
                 // In manual mode, we still want transcripts, but we ignore them in handleUserMessage
                 endpointing = 1000;
@@ -162,7 +162,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
                 smart_format: true,
                 interim_results: true,
                 encoding: "linear16",
-                sample_rate: 24000, // Explicitly match AUDIO_SAMPLE_RATE
+                sample_rate: 24000,
                 endpointing: endpointing,
                 utterance_end_ms: utteranceEndMs,
             });
@@ -214,7 +214,9 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
                 const sentence = data.channel.alternatives[0].transcript;
                 if (!sentence) return;
 
-                if (sentence.trim().length > 0) {
+                // Only barge-in if we have enough confidence/length
+                // Ignore short blips like "um" or noise
+                if (sentence.trim().length > 15) {
                     onInterruption();
                 }
 
