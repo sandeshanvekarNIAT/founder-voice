@@ -17,12 +17,21 @@ import { Mic, MicOff, Play, Square, Loader2, RotateCcw, ArrowLeft } from "lucide
 
 type SessionStatus = 'IDLE' | 'PITCHING' | 'ANALYZING' | 'COMPLETED' | 'ERROR';
 
+import { useTTS } from "@/hooks/use-tts";
+import { VoiceSettings, VoiceMode } from "@/components/war-room/VoiceSettings";
+import { MessageSquare } from "lucide-react";
+
 export default function PitchSessionPage() {
     const [status, setStatus] = useState<SessionStatus>('IDLE');
     const [reportData, setReportData] = useState<ReportData | null>(null);
     const [deckContext, setDeckContext] = useState<string | null>(null);
     const [activeClaim, setActiveClaim] = useState<string | null>(null);
+    const [voiceMode, setVoiceMode] = useState<VoiceMode>('patient'); // Default to Patient Mode
+
     const { initAudio, addToQueue, clearQueue, isPlaying } = useAudioPlayer();
+    const { speak, stop: stopTTS, isPlaying: isTTSPlaying } = useTTS();
+
+    // ... existing callbacks ...
 
     const handleAudioDelta = useCallback((delta: ArrayBuffer) => {
         addToQueue(delta);
@@ -30,10 +39,12 @@ export default function PitchSessionPage() {
 
     const handleInterruption = useCallback(() => {
         clearQueue();
-    }, [clearQueue]);
+        stopTTS(); // Stop speaking if interrupted
+    }, [clearQueue, stopTTS]);
 
     const handleInterrogated = useCallback((claim: string) => {
         setActiveClaim(claim);
+        // optionally speak the claim or a specific interrogation line
     }, []);
 
     const {
@@ -44,19 +55,30 @@ export default function PitchSessionPage() {
         sendAudio,
         transcriptItems,
         clearTranscript,
-        isSpeaking // AI Speaking status
+        manualTrigger // Get manual trigger function
     } = useRealtime({
         onAudioDelta: handleAudioDelta,
         onInterruption: handleInterruption,
         onInterrogated: handleInterrogated,
-        deckContext
+        deckContext,
+        voiceMode // Pass selected mode
     });
 
+    // Auto-speak new assistant messages
+    useEffect(() => {
+        if (transcriptItems.length > 0) {
+            const lastItem = transcriptItems[transcriptItems.length - 1];
+            if (lastItem.role === 'assistant') {
+                speak(lastItem.text);
+            }
+        }
+    }, [transcriptItems, speak]);
+
     const handleRecordingData = useCallback((base64: string) => {
-        if (isConnected) {
+        if (isConnected && !isTTSPlaying) { // Don't record while AI is speaking
             sendAudio(base64);
         }
-    }, [isConnected, sendAudio]);
+    }, [isConnected, sendAudio, isTTSPlaying]);
 
     const { startRecording, stopRecording, isRecording, stream } = useAudioRecorder(handleRecordingData);
 
@@ -69,19 +91,21 @@ export default function PitchSessionPage() {
 
     const handleResetSession = useCallback(async () => {
         stopRecording();
+        stopTTS();
         disconnect();
         clearQueue();
         clearTranscript();
         setStatus('IDLE');
         setReportData(null);
         setDeckContext(null);
-    }, [stopRecording, disconnect, clearQueue, clearTranscript]);
+    }, [stopRecording, disconnect, clearQueue, clearTranscript, stopTTS]);
 
     const handleEndSession = useCallback(async () => {
         if (status !== 'PITCHING') return;
 
         // 1. Stop Recording First to trigger last transcripts
         stopRecording();
+        stopTTS();
 
         // 2. Short delay to "flush" the transcript queue from Deepgram
         setStatus('ANALYZING');
@@ -138,7 +162,7 @@ export default function PitchSessionPage() {
             });
             setStatus('ERROR');
         }
-    }, [status, stopRecording, disconnect, clearQueue, transcriptItems, deckContext]);
+    }, [status, stopRecording, disconnect, clearQueue, transcriptItems, deckContext, stopTTS]);
 
     // Auto-start recording when connected
     useEffect(() => {
@@ -162,8 +186,13 @@ export default function PitchSessionPage() {
                     </div>
                 </div>
                 <div className="flex items-center gap-4">
-                    <div className={`h-3 w-3 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
-                    <span className="font-mono text-sm">{isConnected ? 'ONLINE' : 'OFFLINE'}</span>
+                    {/* Voice Settings */}
+                    <VoiceSettings currentMode={voiceMode} onModeChange={setVoiceMode} />
+
+                    <div className="flex items-center gap-4 ml-4">
+                        <div className={`h-3 w-3 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
+                        <span className="font-mono text-sm">{isConnected ? 'ONLINE' : 'OFFLINE'}</span>
+                    </div>
                 </div>
             </div>
 
@@ -224,7 +253,18 @@ export default function PitchSessionPage() {
                                                     </Button>
                                                 </div>
                                             ) : (
-                                                <div className="flex gap-4">
+                                                <div className="flex gap-4 items-center">
+                                                    {/* Manual Trigger Button */}
+                                                    {voiceMode === 'manual' && (
+                                                        <Button
+                                                            onClick={manualTrigger}
+                                                            size="lg"
+                                                            className="bg-blue-600 hover:bg-blue-700 text-white gap-2 animate-pulse"
+                                                        >
+                                                            <MessageSquare className="w-4 h-4" /> I'M DONE
+                                                        </Button>
+                                                    )}
+
                                                     <Button onClick={handleResetSession} variant="outline" size="lg" className="gap-2 border-white/20 hover:bg-white/10">
                                                         <RotateCcw className="w-4 h-4" /> RESET
                                                     </Button>
@@ -243,7 +283,7 @@ export default function PitchSessionPage() {
                                 <WaveformVisualizer
                                     mode={
                                         activeClaim ? 'interrogated' :
-                                            isSpeaking ? 'agent' :
+                                            isTTSPlaying ? 'agent' :
                                                 (isRecording ? 'user' : 'listening')
                                     }
                                     audioStream={stream}
@@ -251,7 +291,7 @@ export default function PitchSessionPage() {
 
                                 {/* Status Overlay */}
                                 <div className="absolute top-4 right-4 font-mono text-xs text-muted-foreground">
-                                    {activeClaim ? 'INTERROGATING_CLAIM' : (isSpeaking ? 'AI_SPEAKING' : (isRecording ? 'LISTENING...' : 'IDLE'))}
+                                    {activeClaim ? 'INTERROGATING_CLAIM' : (isTTSPlaying ? 'AI_SPEAKING' : (isRecording ? 'LISTENING...' : 'IDLE'))}
                                 </div>
                             </Card>
                         </>

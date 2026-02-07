@@ -2,15 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { TranscriptItem } from '@/components/war-room/LiveTranscript';
 import { createClient, LiveClient, LiveSchema, LiveTranscriptionEvents } from "@deepgram/sdk";
 import { generateVCResponse } from '@/actions/groq';
+import { VoiceMode } from '@/components/war-room/VoiceSettings';
 
 interface UseRealtimeProps {
     onAudioDelta: (audio: ArrayBuffer) => void;
     onInterruption: () => void;
     onInterrogated?: (claim: string) => void; // Called when AI cuts in
     deckContext: string | null;
+    voiceMode: VoiceMode;
 }
 
-export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deckContext }: UseRealtimeProps) => {
+export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deckContext, voiceMode }: UseRealtimeProps) => {
     const [isConnected, setIsConnected] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
     const connectingRef = useRef(false); // Synchronous lock
@@ -68,6 +70,26 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
         // Only prevent TRIGGERING a new response if busy
         if (isThinking || isSpeaking) return;
 
+        // Manual Mode: NEVER auto-trigger response on silence
+        if (voiceMode === 'manual' && !isInterruption) return;
+
+        // Dynamic Mode: Check for keywords or rely on longer silence (which is handled by utterance_end in Deepgram, but we add extra checks here if needed)
+        if (voiceMode === 'dynamic' && !isInterruption) {
+            const keywords = ['over', 'done', 'finished', 'question', 'what do you think'];
+            const lowerText = text.toLowerCase();
+            const hasKeyword = keywords.some(k => lowerText.includes(k));
+            const isLongEnough = text.split(' ').length > 5; // Avoid short fragments
+
+            if (!hasKeyword && !isLongEnough) {
+                console.log("Dynamic Mode: Ignoring short/keyword-less utterance.");
+                return;
+            }
+        }
+
+        triggerResponse(text, isInterruption);
+    }, [speakText, deckContext, isThinking, isSpeaking, voiceMode]);
+
+    const triggerResponse = useCallback(async (text: string, isInterruption = false) => {
         setIsThinking(true);
         try {
             const processedText = isInterruption ? `[INTERRUPTING USER AT: "${text}"]` : text;
@@ -88,7 +110,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
             setIsThinking(false);
             setIsSpeaking(false);
         }
-    }, [speakText, deckContext, isThinking, isSpeaking]);
+    }, [speakText, deckContext]);
 
     const connect = useCallback(async () => {
         if (connectingRef.current || isConnected) {
@@ -117,6 +139,22 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
             if (!key) throw new Error("No Deepgram key");
             deepgramKeyRef.current = key;
 
+            // Determine endpointing based on mode
+            let endpointing = 1000;
+            let utteranceEndMs = 1500;
+
+            if (voiceMode === 'patient') {
+                endpointing = 2000; // Wait 2s for silence
+                utteranceEndMs = 3000; // Wait 3s before finalizing
+            } else if (voiceMode === 'dynamic') {
+                endpointing = 1500;
+                utteranceEndMs = 2000;
+            } else if (voiceMode === 'manual') {
+                // In manual mode, we still want transcripts, but we ignore them in handleUserMessage
+                endpointing = 1000;
+                utteranceEndMs = 1500;
+            }
+
             const deepgram = createClient(key);
             const connection = deepgram.listen.live({
                 model: "nova-2",
@@ -125,8 +163,8 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
                 interim_results: true,
                 encoding: "linear16",
                 sample_rate: 24000, // Explicitly match AUDIO_SAMPLE_RATE
-                endpointing: 1000, // Wait 1s instead of 0.3s
-                utterance_end_ms: 1500, // Added safety buffer for finality
+                endpointing: endpointing,
+                utterance_end_ms: utteranceEndMs,
             });
 
             // CRITICAL: Set immediately so handlers refer to the correct instance
@@ -183,7 +221,9 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
                 const now = Date.now();
                 const canInterrupt = now - lastInterruptionTimeRef.current > interrogationCooldown;
 
-                if (!data.is_final && canInterrupt && !isThinking && !isSpeaking) {
+                // INTERRUPTION LOGIC
+                // In manual mode, AI NEVER interrupts automatically based on red flags
+                if (voiceMode !== 'manual' && !data.is_final && canInterrupt && !isThinking && !isSpeaking) {
                     const lowerSentence = sentence.toLowerCase();
                     const hasRedFlag = redFlags.find(flag => lowerSentence.includes(flag));
                     const isTooLong = sentence.split(' ').length > 50; // Increased from 25
@@ -196,7 +236,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
                     }
                 }
 
-                if (!data.is_final && canInterrupt && !isThinking && !isSpeaking && deckContext) {
+                if (voiceMode !== 'manual' && !data.is_final && canInterrupt && !isThinking && !isSpeaking && deckContext) {
                     const timeSinceLastCheck = now - lastLogicCheckTimeRef.current;
                     if (timeSinceLastCheck > logicCheckInterval && sentence.split(' ').length > 20) { // Increased from 10
                         lastLogicCheckTimeRef.current = now;
@@ -227,7 +267,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
             setIsConnecting(false);
             connectingRef.current = false;
         }
-    }, [handleUserMessage, onInterruption, onInterrogated, isThinking, isSpeaking, isConnected, deckContext]);
+    }, [handleUserMessage, onInterruption, onInterrogated, isThinking, isSpeaking, isConnected, deckContext, voiceMode]); // Added voiceMode dependency
 
     const disconnect = useCallback(() => {
         if (connectionRef.current) {
@@ -272,6 +312,18 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
         fullTranscriptRef.current = [];
     }, []);
 
+    // Manual Trigger for Push-to-Talk
+    const manualTrigger = useCallback(() => {
+        const lastMsg = fullTranscriptRef.current[fullTranscriptRef.current.length - 1];
+        if (lastMsg && lastMsg.role === 'user') {
+            // If the last message was user, assume they just finished speaking and want a reply
+            triggerResponse(lastMsg.content);
+        } else {
+            // Nothing to reply to, or AI already spoke.
+            console.log("Manual trigger ignored: No recent user message to reply to.");
+        }
+    }, [triggerResponse]);
+
     return {
         isConnected,
         isConnecting,
@@ -281,6 +333,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
         disconnect,
         sendAudio,
         transcriptItems,
-        clearTranscript
+        clearTranscript,
+        manualTrigger // Exporting manual trigger
     };
 };

@@ -79,8 +79,14 @@ export async function generateVCResponse(transcript: TranscriptItem[], deckConte
 
         return responseText;
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Groq Error:", error);
-        return "I'm listening. Go on."; // Fallback response
+
+        // Return specific error messages for better debugging
+        if (error?.code === 'invalid_api_key') {
+            return "Configuration Error: Invalid Groq API Key. Please check your .env.local file.";
+        }
+
+        return `Error: ${error.message || "I'm having trouble thinking right now."}`;
     }
 }
