@@ -14,7 +14,7 @@ interface TranscriptItem {
     content: string;
 }
 
-export async function generateVCResponse(transcript: TranscriptItem[], deckContext: string | null = null) {
+export async function generateVCResponse(transcript: TranscriptItem[], deckContext: string | null = null, interactionCount: number = 0) {
     if (!process.env.GROQ_API_KEY) {
         return "System Error: Groq API Key missing.";
     }
@@ -24,6 +24,16 @@ export async function generateVCResponse(transcript: TranscriptItem[], deckConte
 
     if (deckContext) {
         systemPrompt += getDeckContextPrompt(deckContext);
+    }
+
+    // Dynamic Instruction based on interaction count
+    if (interactionCount >= 2) {
+        systemPrompt += `
+        \n[CRITICAL INSTRUCTION]: You have already asked ${interactionCount} questions. 
+        DO NOT request any more information or ask any more questions. 
+        Simply acknowledge the founder ("I see", "Go on", "Understood") or agree/disagree briefly. 
+        Let them finish their pitch.
+        `;
     }
 
     systemPrompt += `

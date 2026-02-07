@@ -171,6 +171,15 @@ export default function PitchSessionPage() {
         }
     }, [isConnected, isRecording, startRecording]);
 
+    // Cleanup on unmount or session end
+    useEffect(() => {
+        return () => {
+            stopRecording();
+            stopTTS();
+            disconnect();
+        };
+    }, [stopRecording, stopTTS, disconnect]);
+
     return (
         <div className="min-h-screen bg-background text-foreground p-8 flex flex-col gap-6 font-sans">
 

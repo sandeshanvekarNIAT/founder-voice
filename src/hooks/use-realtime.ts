@@ -25,6 +25,10 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
     const fullTranscriptRef = useRef<{ role: string, content: string }[]>([]);
     const deepgramKeyRef = useRef<string | null>(null);
 
+    // Buffering Refs
+    const transcriptBufferRef = useRef<string>("");
+    const disconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null); // Reused as debounce timer
+
     // Interrogation State
     const lastInterruptionTimeRef = useRef<number>(0);
     const interrogationCooldown = 20000; // 20 seconds (up from 15s)
@@ -96,7 +100,10 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
             const lastMsg = fullTranscriptRef.current[fullTranscriptRef.current.length - 1];
             if (lastMsg) lastMsg.content = processedText;
 
-            const aiResponseText = await generateVCResponse(fullTranscriptRef.current, deckContext);
+            // Count how many times AI has spoken (questions/comments)
+            const interactionCount = fullTranscriptRef.current.filter(t => t.role === 'assistant').length;
+
+            const aiResponseText = await generateVCResponse(fullTranscriptRef.current, deckContext, interactionCount);
             setIsThinking(false);
 
             addTranscriptItem('assistant', aiResponseText);
@@ -210,6 +217,19 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
                 }
             });
 
+            connection.on(LiveTranscriptionEvents.UtteranceEnd, () => {
+                // If Deepgram says utterance ended, flush the buffer immediately
+                if (transcriptBufferRef.current.trim().length > 0) {
+                    console.log("UtteranceEnd: Flushing buffer");
+                    handleUserMessage(transcriptBufferRef.current);
+                    transcriptBufferRef.current = "";
+                }
+                if (disconnectTimeoutRef.current) {
+                    clearTimeout(disconnectTimeoutRef.current);
+                    disconnectTimeoutRef.current = null;
+                }
+            });
+
             connection.on(LiveTranscriptionEvents.Transcript, async (data) => {
                 const sentence = data.channel.alternatives[0].transcript;
                 if (!sentence) return;
@@ -259,8 +279,24 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
                     }
                 }
 
+                // BUFFERING LOGIC for Final Transcripts
                 if (data.is_final && sentence.trim().length > 0) {
-                    handleUserMessage(sentence);
+                    // Append to buffer
+                    transcriptBufferRef.current += " " + sentence;
+
+                    // Clear existing debounce timer
+                    if (disconnectTimeoutRef.current) { // Reusing ref name for debounce timer (renaming below for clarity would be better but keeping simple)
+                        clearTimeout(disconnectTimeoutRef.current);
+                    }
+
+                    // Set new debounce timer
+                    disconnectTimeoutRef.current = setTimeout(() => {
+                        if (transcriptBufferRef.current.trim().length > 0) {
+                            console.log("Debounce: Flushing buffer");
+                            handleUserMessage(transcriptBufferRef.current);
+                            transcriptBufferRef.current = "";
+                        }
+                    }, 1500); // Wait 1.5s for more chunks (Increased to prevent fragmentation)
                 }
             });
 
