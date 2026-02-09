@@ -10,11 +10,5 @@ export function validateEnv() {
         (key) => !process.env[key]
     );
 
-    if (missing.length > 0) {
-        throw new Error(
-            `❌ Invalid Environment Variables: Missing ${missing.join(
-                ", "
-            )}. Please check your .env.local file.`
-        );
-    }
+    return missing;
 }

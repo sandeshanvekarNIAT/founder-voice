@@ -5,7 +5,7 @@ import { AuthProvider } from "@/components/auth/AuthProvider";
 import { validateEnv } from "@/lib/env";
 
 // Validate environment variables on startup
-validateEnv();
+const missingEnvVars = validateEnv();
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -50,6 +50,39 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // If critical env vars are missing, render a helpful error screen instead of crashing
+  if (missingEnvVars.length > 0) {
+    return (
+      <html lang="en">
+        <body className="bg-neutral-950 text-white flex items-center justify-center h-screen p-8 font-sans">
+          <div className="max-w-2xl bg-neutral-900 border border-red-800 rounded-xl p-8 shadow-2xl">
+            <h1 className="text-3xl font-bold text-red-500 mb-4">Deployment Configuration Error</h1>
+            <p className="text-neutral-300 mb-6 text-lg">
+              The application started, but some required Environment Variables are missing.
+            </p>
+
+            <div className="bg-black/50 rounded-lg p-6 border border-neutral-800 mb-6">
+              <h3 className="text-sm font-mono text-neutral-500 uppercase tracking-widest mb-3">Missing Variables</h3>
+              <ul className="space-y-2">
+                {missingEnvVars.map(key => (
+                  <li key={key} className="font-mono text-red-400 flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
+                    {key}
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="text-sm text-neutral-400">
+              <p className="mb-2"><strong>To Fix:</strong> Go to your Netlify Dashboard &rarr; Site Configuration &rarr; Environment Variables.</p>
+              <p>Add the missing keys listed above, then <strong>Trigger a Redeploy</strong>.</p>
+            </div>
+          </div>
+        </body>
+      </html>
+    );
+  }
+
   return (
     <html lang="en" suppressHydrationWarning>
       <body
