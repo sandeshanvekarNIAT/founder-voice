@@ -133,7 +133,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
             // Count how many times AI has spoke (questions/comments)
             const interactionCount = fullTranscriptRef.current.filter(t => t.role === 'assistant').length;
 
-            const aiResponseText = await generateVCResponse(fullTranscriptRef.current, deckContext, interactionCount, timeLeftRef.current);
+            const aiResponseText = await generateVCResponse(fullTranscriptRef.current, deckContext, timeLeftRef.current);
             setIsThinking(false);
 
             if (!aiResponseText || aiResponseText.trim().length === 0) {

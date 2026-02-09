@@ -18,7 +18,7 @@ export function MissionSection() {
                         Merit Over Zip Code.
                     </h2>
                     <p className="text-lg text-muted-foreground leading-relaxed font-[family-name:var(--font-josefin)]">
-                        The "Warm Intro" is a bug, not a feature. It excludes brilliant founders who didn't go to Stanford or don't live in SF.
+                        The &quot;Warm Intro&quot; is a bug, not a feature. It excludes brilliant founders who didn&apos;t go to Stanford or don&apos;t live in SF.
                         <br />
                         We built Founder Voice to give <b>everyone</b> access to world-class feedback, 24/7.
                     </p>
@@ -35,7 +35,7 @@ export function MissionSection() {
                         </div>
                         <h3 className="text-xl font-bold mb-3 text-left">The Old Way</h3>
                         <p className="text-sm text-neutral-400 text-left font-[family-name:var(--font-josefin)]">
-                            Gatekeepers. "Who do you know?" "Let me check my calendar for next month."
+                            Gatekeepers. &quot;Who do you know?&quot; &quot;Let me check my calendar for next month.&quot;
                         </p>
                     </motion.div>
 

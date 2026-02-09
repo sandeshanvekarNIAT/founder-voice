@@ -23,10 +23,10 @@ export function ProblemSection() {
                             <p className="text-lg text-muted-foreground leading-relaxed font-[family-name:var(--font-josefin)]">
                                 You spend months building. Weeks designing the deck. You get the meeting. You pitch your heart out.
                                 <br /><br />
-                                And then? "We'll get back to you."
+                                And then? &quot;We&apos;ll get back to you.&quot;
                                 <br /><br />
-                                They never do. Or if they do, it's a generic "You're too early."
-                                You never learn <b>why</b> you failed. You can't fix what you can't see.
+                                They never do. Or if they do, it&apos;s a generic &quot;You&apos;re too early.&quot;
+                                You never learn <b>why</b> you failed. You can&apos;t fix what you can&apos;t see.
                             </p>
                         </motion.div>
 

@@ -24,9 +24,10 @@ export async function POST(req: NextRequest) {
 
         try {
             console.log("Starting PDF extraction with pdf2json...");
-            const pdfParser = new PDFParser(null, 1);
+            const pdfParser = new PDFParser(null, true);
 
             text = await new Promise<string>((resolve, reject) => {
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 pdfParser.on("pdfParser_dataError", (errData: any) => reject(errData.parserError));
                 pdfParser.on("pdfParser_dataReady", () => {
                     resolve(pdfParser.getRawTextContent());
@@ -34,6 +35,7 @@ export async function POST(req: NextRequest) {
                 pdfParser.parseBuffer(buffer);
             });
             console.log(`Extracted ${text.length} characters`);
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
         } catch (parseError: any) {
             console.error("pdf2json extraction failed:", parseError);
             return NextResponse.json({
@@ -70,6 +72,7 @@ export async function POST(req: NextRequest) {
             warning: deckId ? null : "Document processed but failed to save to database."
         });
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
         console.error("API /api/parse-pdf Fatal Error:", error);
         return NextResponse.json({

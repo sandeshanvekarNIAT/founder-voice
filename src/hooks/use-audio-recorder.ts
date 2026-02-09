@@ -3,6 +3,7 @@ import { floatTo16BitPCM, arrayBufferToBase64, AUDIO_SAMPLE_RATE } from '@/lib/a
 
 export const useAudioRecorder = (onAudioData: (base64: string) => void) => {
     const [isRecording, setIsRecording] = useState(false);
+    const [stream, setStream] = useState<MediaStream | null>(null);
     const streamRef = useRef<MediaStream | null>(null);
     const audioContextRef = useRef<AudioContext | null>(null);
     const workletNodeRef = useRef<AudioWorkletNode | null>(null);
@@ -21,6 +22,7 @@ export const useAudioRecorder = (onAudioData: (base64: string) => void) => {
             });
 
             streamRef.current = stream;
+            setStream(stream);
 
             const audioContext = new AudioContext({ sampleRate: AUDIO_SAMPLE_RATE });
             audioContextRef.current = audioContext;
@@ -56,6 +58,7 @@ export const useAudioRecorder = (onAudioData: (base64: string) => void) => {
         if (streamRef.current) {
             streamRef.current.getTracks().forEach(track => track.stop());
             streamRef.current = null;
+            setStream(null);
         }
         if (workletNodeRef.current) {
             workletNodeRef.current.port.onmessage = null;
@@ -73,6 +76,6 @@ export const useAudioRecorder = (onAudioData: (base64: string) => void) => {
         setIsRecording(false);
     }, []);
 
-    return { isRecording, startRecording, stopRecording, stream: streamRef.current };
+    return { isRecording, startRecording, stopRecording, stream };
 };
 

@@ -14,7 +14,7 @@ import { useAudioRecorder } from "@/hooks/use-audio-recorder";
 import { useAudioPlayer } from "@/hooks/use-audio-player";
 import { useTTS } from "@/hooks/use-tts";
 import Link from "next/link";
-import { Mic, MicOff, Play, Square, Loader2, RotateCcw, ArrowLeft } from "lucide-react";
+import { Play, Square, Loader2, RotateCcw, ArrowLeft } from "lucide-react";
 
 type SessionStatus = 'IDLE' | 'PITCHING' | 'ANALYZING' | 'COMPLETED' | 'ERROR';
 

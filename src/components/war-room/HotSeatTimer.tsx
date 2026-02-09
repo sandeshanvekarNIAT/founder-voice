@@ -21,10 +21,10 @@ export function HotSeatTimer({ durationSeconds, isActive, onTimeEnd, onTimeUpdat
     }, [onTimeEnd]);
 
     useEffect(() => {
-        if (!isActive) {
+        if (!isActive && timeLeft !== durationSeconds) {
             setTimeLeft(durationSeconds);
         }
-    }, [isActive, durationSeconds]);
+    }, [isActive, durationSeconds, timeLeft]);
 
     // Effect for the countdown
     useEffect(() => {

@@ -1,9 +1,0 @@
-CWD: C:\Users\SANDESH ANVEKAR\.gemini\antigravity\scratch\Founders Voice\founder-voice
-Checking script at: C:\Users\SANDESH ANVEKAR\.gemini\antigravity\scratch\Founders Voice\founder-voice\src\scripts\tts_wrapper.py
-Script file exists.
-Checking python version...
-Python stdout: Python 3.13.12
-
-Python exited with 0
-Testing generateTTS...
-Success! Generated 11664 bytes.

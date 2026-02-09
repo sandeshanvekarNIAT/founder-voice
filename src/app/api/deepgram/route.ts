@@ -62,6 +62,7 @@ export async function GET() {
 
         return NextResponse.json({ key: result.key });
 
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
         console.error("Deepgram Auth Error:", error);
         return NextResponse.json(

@@ -1,6 +1,7 @@
 "use server";
 
-import Groq from "groq-sdk";
+import { Groq } from "groq-sdk";
+import type { ChatCompletionMessageParam } from "groq-sdk/resources/chat/completions";
 import { searchTavily } from "./tavily";
 import { VC_SYSTEM_PROMPT, getDeckContextPrompt } from "@/lib/prompts";
 
@@ -14,7 +15,7 @@ interface TranscriptItem {
     content: string;
 }
 
-export async function generateVCResponse(transcript: TranscriptItem[], deckContext: string | null = null, interactionCount: number = 0, timeLeft: number = 180) {
+export async function generateVCResponse(transcript: TranscriptItem[], deckContext: string | null = null, timeLeft: number = 180) {
     if (!process.env.GROQ_API_KEY) {
         return "System Error: Groq API Key missing.";
     }
@@ -61,7 +62,7 @@ export async function generateVCResponse(transcript: TranscriptItem[], deckConte
 
     try {
         const completion = await groq.chat.completions.create({
-            messages: messages as any,
+            messages: messages as ChatCompletionMessageParam[],
             model: "llama-3.1-8b-instant",
             temperature: 0.7,
             max_tokens: 150,
@@ -96,7 +97,7 @@ export async function generateVCResponse(transcript: TranscriptItem[], deckConte
             ];
 
             const toolCompletion = await groq.chat.completions.create({
-                messages: toolMessages as any,
+                messages: toolMessages as ChatCompletionMessageParam[],
                 model: "llama-3.1-8b-instant",
                 temperature: 0.7,
                 max_tokens: 150,

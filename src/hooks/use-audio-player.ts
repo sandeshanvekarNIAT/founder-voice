@@ -19,6 +19,31 @@ export const useAudioPlayer = () => {
         console.log("AudioContext Initialized & Resumed:", audioContextRef.current.state);
     }, []);
 
+    const playBuffer = useCallback((buffer: AudioBuffer) => {
+        if (!audioContextRef.current) return;
+        const ctx = audioContextRef.current;
+
+        const source = ctx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(ctx.destination);
+
+        const currentTime = ctx.currentTime;
+        // Schedule strictly after the previous chunk
+        // Ensure we don't schedule in the past
+        const startTime = Math.max(currentTime, nextStartTimeRef.current);
+
+        source.start(startTime);
+        nextStartTimeRef.current = startTime + buffer.duration;
+
+        setIsPlaying(true);
+
+        source.onended = () => {
+            if (ctx.currentTime >= nextStartTimeRef.current) {
+                setIsPlaying(false);
+            }
+        };
+    }, []);
+
     const addToQueue = useCallback((data: string | ArrayBuffer) => {
         if (!audioContextRef.current) {
             console.warn("AudioContext not initialized. Call initAudio() first.");
@@ -45,32 +70,7 @@ export const useAudioPlayer = () => {
         buffer.copyToChannel(float32Array, 0);
 
         playBuffer(buffer);
-    }, []);
-
-    const playBuffer = (buffer: AudioBuffer) => {
-        if (!audioContextRef.current) return;
-        const ctx = audioContextRef.current;
-
-        const source = ctx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(ctx.destination);
-
-        const currentTime = ctx.currentTime;
-        // Schedule strictly after the previous chunk
-        // Ensure we don't schedule in the past
-        const startTime = Math.max(currentTime, nextStartTimeRef.current);
-
-        source.start(startTime);
-        nextStartTimeRef.current = startTime + buffer.duration;
-
-        setIsPlaying(true);
-
-        source.onended = () => {
-            if (ctx.currentTime >= nextStartTimeRef.current) {
-                setIsPlaying(false);
-            }
-        };
-    };
+    }, [playBuffer]);
 
     const clearQueue = useCallback(() => {
         if (audioContextRef.current) {
