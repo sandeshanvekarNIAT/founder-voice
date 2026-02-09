@@ -5,9 +5,8 @@ import type { ChatCompletionMessageParam } from "groq-sdk/resources/chat/complet
 import { searchTavily } from "./tavily";
 import { VC_SYSTEM_PROMPT, getDeckContextPrompt } from "@/lib/prompts";
 
-const groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY,
-});
+// Groq client initialized lazily inside function
+
 
 // Define type for transcript items
 interface TranscriptItem {
@@ -19,6 +18,10 @@ export async function generateVCResponse(transcript: TranscriptItem[], deckConte
     if (!process.env.GROQ_API_KEY) {
         return "System Error: Groq API Key missing.";
     }
+
+    const groq = new Groq({
+        apiKey: process.env.GROQ_API_KEY,
+    });
 
     // System Prompt for the VC Persona
     let systemPrompt = VC_SYSTEM_PROMPT;
