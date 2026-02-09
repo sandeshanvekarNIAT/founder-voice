@@ -6,7 +6,8 @@ import EventEmitter from 'events';
 class TTSService extends EventEmitter {
     private process: ChildProcess | null = null;
     private queue: { text: string; resolve: (data: Buffer) => void; reject: (err: Error) => void }[] = [];
-    private isIterating = false;
+    private isProcessing = false;
+    private buffer = '';
 
     constructor() {
         super();
