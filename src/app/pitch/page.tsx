@@ -12,14 +12,15 @@ import { InterrogationAlert } from "@/components/war-room/InterrogationAlert";
 import { useRealtime } from "@/hooks/use-realtime";
 import { useAudioRecorder } from "@/hooks/use-audio-recorder";
 import { useAudioPlayer } from "@/hooks/use-audio-player";
+import { useTTS } from "@/hooks/use-tts";
 import Link from "next/link";
 import { Mic, MicOff, Play, Square, Loader2, RotateCcw, ArrowLeft } from "lucide-react";
 
 type SessionStatus = 'IDLE' | 'PITCHING' | 'ANALYZING' | 'COMPLETED' | 'ERROR';
 
-import { useTTS } from "@/hooks/use-tts";
 import { VoiceSettings, VoiceMode } from "@/components/war-room/VoiceSettings";
 import { MessageSquare } from "lucide-react";
+import { useAuth } from "@/components/auth/AuthProvider";
 
 export default function PitchSessionPage() {
     const [status, setStatus] = useState<SessionStatus>('IDLE');
@@ -27,6 +28,7 @@ export default function PitchSessionPage() {
     const [deckContext, setDeckContext] = useState<string | null>(null);
     const [activeClaim, setActiveClaim] = useState<string | null>(null);
     const [voiceMode, setVoiceMode] = useState<VoiceMode>('patient'); // Default to Patient Mode
+    const { signOut } = useAuth();
 
     const { initAudio, addToQueue, clearQueue, isPlaying } = useAudioPlayer();
     const { speak, stop: stopTTS, isPlaying: isTTSPlaying } = useTTS();
@@ -47,6 +49,8 @@ export default function PitchSessionPage() {
         // optionally speak the claim or a specific interrogation line
     }, []);
 
+    const timeLeftRef = useRef<number>(300); // Track time for AI context
+
     const {
         connect,
         disconnect,
@@ -61,18 +65,25 @@ export default function PitchSessionPage() {
         onInterruption: handleInterruption,
         onInterrogated: handleInterrogated,
         deckContext,
-        voiceMode // Pass selected mode
+        voiceMode, // Pass selected mode
+        timeLeftRef // Pass time context
     });
 
-    // Auto-speak new assistant messages
+    // Auto-speak new assistant messages (Restored but strictly gated)
     useEffect(() => {
-        if (transcriptItems.length > 0) {
+        if (status === 'PITCHING' && isConnected && transcriptItems.length > 0) {
             const lastItem = transcriptItems[transcriptItems.length - 1];
             if (lastItem.role === 'assistant') {
                 speak(lastItem.text);
             }
         }
-    }, [transcriptItems, speak]);
+    }, [transcriptItems, speak, status, isConnected]);
+
+
+    // Audio is now handled entirely by useRealtime streaming to useAudioPlayer
+    // The previous useEffect that triggered speak() was causing double audio and zombie playback.
+
+    // Auto-scroll logic could go here if needed, but LiveTranscript handles it internally.
 
     const handleRecordingData = useCallback((base64: string) => {
         if (isConnected && !isTTSPlaying) { // Don't record while AI is speaking
@@ -106,6 +117,7 @@ export default function PitchSessionPage() {
         // 1. Stop Recording First to trigger last transcripts
         stopRecording();
         stopTTS();
+        clearQueue(); // Kill audio immediately
 
         // 2. Short delay to "flush" the transcript queue from Deepgram
         setStatus('ANALYZING');
@@ -202,6 +214,10 @@ export default function PitchSessionPage() {
                         <div className={`h-3 w-3 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-red-500'}`} />
                         <span className="font-mono text-sm">{isConnected ? 'ONLINE' : 'OFFLINE'}</span>
                     </div>
+
+                    <Button variant="ghost" size="sm" onClick={() => signOut()} className="text-muted-foreground hover:text-white ml-2">
+                        Log Out
+                    </Button>
                 </div>
             </div>
 
@@ -234,9 +250,10 @@ export default function PitchSessionPage() {
                                 ) : (
                                     <>
                                         <HotSeatTimer
-                                            durationSeconds={180}
+                                            durationSeconds={300}
                                             isActive={status === 'PITCHING'}
                                             onTimeEnd={handleEndSession}
+                                            onTimeUpdate={(t) => timeLeftRef.current = t}
                                         />
 
                                         <div className="flex gap-4">

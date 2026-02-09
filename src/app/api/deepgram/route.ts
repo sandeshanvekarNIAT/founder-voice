@@ -14,9 +14,38 @@ export async function GET() {
     try {
         const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
 
+        let projectId = process.env.DEEPGRAM_PROJECT_ID;
+
+        // Auto-resolve Project ID if missing
+        if (!projectId) {
+            const { result: projects, error: projectsError } = await deepgram.manage.getProjects();
+            if (projectsError) {
+                console.error("Deepgram Error: Could not list projects to find ID.", projectsError);
+                return NextResponse.json(
+                    { error: "DEEPGRAM_PROJECT_ID is missing and could not be auto-discovered. Please check your API Key permissions or set the variable manually." },
+                    { status: 500 }
+                );
+            }
+            if (projects?.projects?.[0]) {
+                projectId = projects.projects[0].project_id;
+            } else {
+                return NextResponse.json(
+                    { error: "No Deepgram Projects found for this API Key." },
+                    { status: 404 }
+                );
+            }
+        }
+
+        if (!projectId) {
+            return NextResponse.json(
+                { error: "Could not determine Deepgram Project ID." },
+                { status: 500 }
+            );
+        }
+
         // Create a temporary key that lasts for 10 seconds
         const { result, error } = await deepgram.manage.createProjectKey(
-            process.env.DEEPGRAM_PROJECT_ID || "founder-voice",
+            projectId,
             {
                 comment: "Ephemeral key for browser client",
                 scopes: ["usage:write"],
@@ -24,41 +53,20 @@ export async function GET() {
             }
         );
 
-        // Note: If you don't have a Project ID set, we can just use the server-side key
-        // for this MVP to keep it simple, or return a presigned URL if using that method.
-        // However, Deepgram's recommended way for browser access is creating a temporary key
-        // OR proxing the connection. 
-        //
-        // SIMPLER APPROACH FOR MVP FREE TIER:
-        // Just return the key if it's safe (it's not, but for a personal project it's okay-ish)
-        // BETTER APPROACH: Use the key to generate a temp key.
-
-        // Fallback if management API fails (common on free tier/scoped keys):
-        // We will just return a "Usage" token if possible or proxied signature.
-
-        // ACTUALLY: The standard pattern is to use the server SDK to generate a key.
-        // If we can't create keys (permissions), let's try to return the ID.
-
-        // Let's stick to the official pattern:
-        // If the create key fails (likely due to permissions on the main key), 
-        // we might need to assume the user provided a key that CAN create keys.
-
-        // ALTERNATIVE: For this quick refactor, we can just use the server to proxy
-        // but that adds latency. 
-
-        // Let's try to create a key. If it fails, we handle it.
-
         if (error) {
-            console.warn("Could not create ephemeral key, falling back to env key (Use with caution)", error);
-            // For a local hackathon project, this is acceptable.
+            console.error("Deepgram Error: Could not create ephemeral key (Check API Permissions).", error);
+            // Fallback: If we can't create a key, we must use the server one (less secure but functional).
+            // WARN: The user should upgrade their key permissions to 'Admin' or 'Owner' for production security.
             return NextResponse.json({ key: process.env.DEEPGRAM_API_KEY });
         }
 
         return NextResponse.json({ key: result.key });
 
-    } catch (error) {
+    } catch (error: any) {
         console.error("Deepgram Auth Error:", error);
-        // Fallback
-        return NextResponse.json({ key: process.env.DEEPGRAM_API_KEY });
+        return NextResponse.json(
+            { error: error?.message || "Failed to generate temporary key." },
+            { status: 500 }
+        );
     }
 }

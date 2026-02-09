@@ -2,17 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 import { supabase } from "@/lib/supabase";
+import PDFParser from "pdf2json";
 
 export async function POST(req: NextRequest) {
     console.log("POST /api/parse-pdf: Request received");
-
-    // Polyfill for DOMMatrix inside the worker to be safe
-    if (typeof global.DOMMatrix === 'undefined') {
-        // @ts-ignore
-        global.DOMMatrix = class DOMMatrix {
-            constructor() { }
-        };
-    }
 
     try {
         const formData = await req.formData();
@@ -28,58 +21,25 @@ export async function POST(req: NextRequest) {
         const buffer = Buffer.from(arrayBuffer);
 
         let text = "";
-        let pdfModule: any;
 
         try {
-            // Attempt to load pdf-parse strictly inside the try block
-            pdfModule = require("pdf-parse");
-        } catch (loadError: any) {
-            console.error("Failed to load pdf-parse library:", loadError);
-            return NextResponse.json({
-                error: "PDF Library Load Failure",
-                details: loadError.message,
-                suggestion: "Check if pdf-parse is correctly installed and compatible with this Node version."
-            }, { status: 500 });
-        }
+            console.log("Starting PDF extraction with pdf2json...");
+            const pdfParser = new PDFParser(null, 1);
 
-        let pdf: any;
-        if (typeof pdfModule === 'function') {
-            pdf = pdfModule;
-        } else if (pdfModule && typeof pdfModule.PDFParse === 'function') {
-            pdf = pdfModule.PDFParse;
-        } else if (pdfModule && (pdfModule.default || pdfModule.pdf)) {
-            pdf = pdfModule.default || pdfModule.pdf;
-        }
-
-        if (typeof pdf !== 'function') {
-            throw new Error(`PDF Library initialization failed. Found: ${typeof pdf}`);
-        }
-
-        try {
-            console.log("Starting PDF extraction with pdf-parse...");
-            const data = await pdf(buffer);
-            text = data.text;
+            text = await new Promise<string>((resolve, reject) => {
+                pdfParser.on("pdfParser_dataError", (errData: any) => reject(errData.parserError));
+                pdfParser.on("pdfParser_dataReady", () => {
+                    resolve(pdfParser.getRawTextContent());
+                });
+                pdfParser.parseBuffer(buffer);
+            });
             console.log(`Extracted ${text.length} characters`);
         } catch (parseError: any) {
-            console.error("pdf-parse extraction failed:", parseError);
-
-            // Fallback to pdf2json if available
-            try {
-                console.log("Attempting fallback to pdf2json...");
-                const PDFParser = require("pdf2json");
-                const pdfParser = new PDFParser(null, 1);
-
-                text = await new Promise<string>((resolve, reject) => {
-                    pdfParser.on("pdfParser_dataError", (errData: any) => reject(errData.parserError));
-                    pdfParser.on("pdfParser_dataReady", () => {
-                        resolve(pdfParser.getRawTextContent());
-                    });
-                    pdfParser.parseBuffer(buffer);
-                });
-                console.log(`Extracted ${text.length} characters via pdf2json`);
-            } catch (fallbackError: any) {
-                throw new Error(`Both pdf-parse and pdf2json failed. Primary error: ${parseError.message}. Fallback error: ${fallbackError.message}`);
-            }
+            console.error("pdf2json extraction failed:", parseError);
+            return NextResponse.json({
+                error: "PDF Extraction Failed",
+                details: parseError.message
+            }, { status: 500 });
         }
 
         if (!text || text.trim().length === 0) {

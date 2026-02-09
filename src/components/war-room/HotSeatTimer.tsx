@@ -7,9 +7,10 @@ interface TimerProps {
     durationSeconds: number; // e.g., 180
     isActive: boolean;
     onTimeEnd?: () => void;
+    onTimeUpdate?: (secondsLeft: number) => void;
 }
 
-export function HotSeatTimer({ durationSeconds, isActive, onTimeEnd }: TimerProps) {
+export function HotSeatTimer({ durationSeconds, isActive, onTimeEnd, onTimeUpdate }: TimerProps) {
     const [timeLeft, setTimeLeft] = useState(durationSeconds);
 
     const onTimeEndRef = useRef(onTimeEnd);
@@ -30,11 +31,15 @@ export function HotSeatTimer({ durationSeconds, isActive, onTimeEnd }: TimerProp
         if (!isActive || timeLeft <= 0) return;
 
         const interval = setInterval(() => {
-            setTimeLeft((prev) => Math.max(0, prev - 1));
+            setTimeLeft((prev) => {
+                const newValue = Math.max(0, prev - 1);
+                if (onTimeUpdate) onTimeUpdate(newValue);
+                return newValue;
+            });
         }, 1000);
 
         return () => clearInterval(interval);
-    }, [isActive, timeLeft]);
+    }, [isActive, timeLeft, onTimeUpdate]);
 
     // Dedicated effect to trigger completion - fixes "update while rendering" error
     useEffect(() => {

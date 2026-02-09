@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, memo } from "react";
 
 type VisualizerMode = "agent" | "user" | "listening" | "interrogated";
 
@@ -9,7 +9,7 @@ interface WaveformProps {
     audioStream?: MediaStream | null; // For User mode
 }
 
-export function WaveformVisualizer({ mode, audioStream }: WaveformProps) {
+function WaveformVisualizerComponent({ mode, audioStream }: WaveformProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const animationRef = useRef<number>(0);
     const analyserRef = useRef<AnalyserNode | null>(null);
@@ -123,3 +123,5 @@ export function WaveformVisualizer({ mode, audioStream }: WaveformProps) {
         />
     );
 }
+
+export const WaveformVisualizer = memo(WaveformVisualizerComponent);

@@ -3,6 +3,16 @@ import Groq from "groq-sdk";
 
 export const maxDuration = 60;
 
+interface TranscriptItem {
+    role: string;
+    text: string;
+}
+
+interface ReportRequestBody {
+    transcript: TranscriptItem[];
+    deckContext?: string;
+}
+
 export async function POST(req: Request) {
     console.log(">>> REPORT API: START");
     try {
@@ -11,7 +21,7 @@ export async function POST(req: Request) {
         const body = await req.json().catch(e => {
             console.error(">>> REPORT API: JSON Parse Error", e);
             return null;
-        });
+        }) as ReportRequestBody | null;
 
         if (!body || !body.transcript || !Array.isArray(body.transcript)) {
             console.warn(">>> REPORT API: INVALID TRANSCRIPT (Not an array or missing)");
@@ -29,7 +39,7 @@ export async function POST(req: Request) {
 
         // Format transcript
         const conversationText = transcript
-            .map((t: any) => `${t.role.toUpperCase()}: ${t.text}`)
+            .map((t) => `${t.role.toUpperCase()}: ${t.text}`)
             .join("\n");
 
         const prompt = `
@@ -107,15 +117,16 @@ OUTPUT FORMAT (JSON ONLY, NO MARKDOWN, NO EXPLANATION BEFORE OR AFTER):
             });
         }
 
-    } catch (error: any) {
-        console.error(`>>> REPORT API: CRITICAL ERROR - ${error.message}`);
-        if (error.stack) console.error(error.stack);
+    } catch (error: unknown) {
+        const err = error as Error;
+        console.error(`>>> REPORT API: CRITICAL ERROR - ${err.message}`);
+        if (err.stack) console.error(err.stack);
 
         return NextResponse.json(
             {
                 error: "Failed to generate report",
-                details: error.message,
-                stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+                details: err.message,
+                stack: process.env.NODE_ENV === 'development' ? err.stack : undefined
             },
             { status: 500 }
         );

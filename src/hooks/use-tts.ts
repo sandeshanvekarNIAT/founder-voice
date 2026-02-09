@@ -111,9 +111,12 @@ export function useTTS() {
 
             // We want the first sentence ASAP.
             for (const sentence of sentences) {
-                if (!sentence.trim()) continue;
+                const trimmed = sentence.trim();
+                // Check if text contains at least one alphanumeric character to avoid "silence" TTS errors
+                if (!trimmed || !/[a-zA-Z0-9]/.test(trimmed)) continue;
+
                 if (stopSignalRef.current) break;
-                await fetchAndQueue(sentence.trim());
+                await fetchAndQueue(trimmed);
             }
         }, 50);
 

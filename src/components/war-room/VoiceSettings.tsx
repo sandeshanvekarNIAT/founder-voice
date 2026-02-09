@@ -39,9 +39,9 @@ export function VoiceSettings({ currentMode, onModeChange }: VoiceSettingsProps)
                         <div className="flex items-center space-x-2 border p-4 rounded-md border-white/10 hover:bg-white/5 transition-colors">
                             <RadioGroupItem value="patient" id="patient" />
                             <div className="flex-1">
-                                <Label htmlFor="patient" className="font-bold cursor-pointer">Patient Mode (Recommended)</Label>
+                                <Label htmlFor="patient" className="font-bold cursor-pointer">Patient Mode</Label>
                                 <p className="text-sm text-muted-foreground mt-1">
-                                    Waits 3 seconds after you stop speaking before replying. Good for thinking.
+                                    Waits 3 seconds. Good for streaming thoughts.
                                 </p>
                             </div>
                         </div>
@@ -50,16 +50,16 @@ export function VoiceSettings({ currentMode, onModeChange }: VoiceSettingsProps)
                             <div className="flex-1">
                                 <Label htmlFor="manual" className="font-bold cursor-pointer">Push-to-Talk</Label>
                                 <p className="text-sm text-muted-foreground mt-1">
-                                    AI never interrupts. You must click "I'm Done" when finished.
+                                    Click "I'm Done" when finished. Zero accidental interruptions.
                                 </p>
                             </div>
                         </div>
                         <div className="flex items-center space-x-2 border p-4 rounded-md border-white/10 hover:bg-white/5 transition-colors">
-                            <RadioGroupItem value="dynamic" id="dynamic" />
+                            <RadioGroupItem value="interview" id="interview" />
                             <div className="flex-1">
-                                <Label htmlFor="dynamic" className="font-bold cursor-pointer">Smart Pause (Beta)</Label>
+                                <Label htmlFor="interview" className="font-bold cursor-pointer">Interview Mode</Label>
                                 <p className="text-sm text-muted-foreground mt-1">
-                                    Detects keywords like "over" or "done". Ignores long pauses.
+                                    AI asks "Are you done?" after silence. Saves tokens.
                                 </p>
                             </div>
                         </div>

@@ -10,9 +10,10 @@ interface UseRealtimeProps {
     onInterrogated?: (claim: string) => void; // Called when AI cuts in
     deckContext: string | null;
     voiceMode: VoiceMode;
+    timeLeftRef: React.MutableRefObject<number>;
 }
 
-export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deckContext, voiceMode }: UseRealtimeProps) => {
+export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deckContext, voiceMode, timeLeftRef }: UseRealtimeProps) => {
     const [isConnected, setIsConnected] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
     const connectingRef = useRef(false); // Synchronous lock
@@ -38,12 +39,17 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
     const lastLogicCheckTimeRef = useRef<number>(0);
     const logicCheckInterval = 12000; // 12 seconds (up from 5s)
 
-    const speakText = useCallback(async (text: string) => {
+    const fetchTTS = useCallback(async (text: string): Promise<ArrayBuffer | null> => {
+        if (!text || text.trim().length === 0) {
+            if (process.env.NODE_ENV === 'development') console.warn("[TTS] Skipped empty text request");
+            return null;
+        }
+        if (process.env.NODE_ENV === 'development') console.log(`[TTS] Requesting speak for: "${text}"`);
         try {
             const key = deepgramKeyRef.current;
             if (!key) {
-                console.log("TTS Ignored: Session disconnected or key cleared.");
-                return;
+                console.warn("[TTS] Skipped: No Deepgram Key available (Session likely ended).");
+                return null;
             }
             const url = `https://api.deepgram.com/v1/speak?model=aura-asteria-en&container=none&encoding=linear16&sample_rate=24000`;
 
@@ -56,26 +62,50 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
                 body: JSON.stringify({ text })
             });
 
-            if (!response.ok) throw new Error("TTS Failed");
+            if (!response.ok) {
+                const errText = await response.text();
+                throw new Error(`TTS Failed: ${response.status} ${errText}`);
+            }
 
             const audioBuffer = await response.arrayBuffer();
-            onAudioDelta(audioBuffer);
+            return audioBuffer;
 
         } catch (e) {
-            console.error("TTS Error:", e);
+            console.error("[TTS] Critical Error:", e);
+            return null;
         }
-    }, [onAudioDelta]);
+    }, []);
 
-    const handleUserMessage = useCallback(async (text: string, isInterruption = false) => {
+    // Helper for legacy single calls (if any)
+    const speakText = useCallback(async (text: string) => {
+        const buffer = await fetchTTS(text);
+        if (buffer) onAudioDelta(buffer);
+    }, [fetchTTS, onAudioDelta]);
+
+    const handleUserMessage = useCallback(async (text: string, isInterruption = false, skipResponse = false) => {
+        // FILTER: Ignore short noise/blips (less than 5 chars) unless it's a manual trigger
+        if (text.trim().length < 5 && voiceMode !== 'manual') {
+            console.log("Ignored short utterance (noise):", text);
+            return;
+        }
+
         // ALWAYS LOG, even if AI is busy
         addTranscriptItem('user', text);
         fullTranscriptRef.current.push({ role: 'user', content: text });
+
+        // Sliding window for context as well
+        if (fullTranscriptRef.current.length > 50) {
+            fullTranscriptRef.current = fullTranscriptRef.current.slice(fullTranscriptRef.current.length - 50);
+        }
 
         // Only prevent TRIGGERING a new response if busy
         if (isThinking || isSpeaking) return;
 
         // Manual Mode: NEVER auto-trigger response on silence
         if (voiceMode === 'manual' && !isInterruption) return;
+
+        // Interview Mode: If skipping response (waiting for confirmation), stop here.
+        if (skipResponse) return;
 
         // Dynamic Mode: Check for keywords or rely on longer silence (which is handled by utterance_end in Deepgram, but we add extra checks here if needed)
         if (voiceMode === 'dynamic' && !isInterruption) {
@@ -100,24 +130,69 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
             const lastMsg = fullTranscriptRef.current[fullTranscriptRef.current.length - 1];
             if (lastMsg) lastMsg.content = processedText;
 
-            // Count how many times AI has spoken (questions/comments)
+            // Count how many times AI has spoke (questions/comments)
             const interactionCount = fullTranscriptRef.current.filter(t => t.role === 'assistant').length;
 
-            const aiResponseText = await generateVCResponse(fullTranscriptRef.current, deckContext, interactionCount);
+            const aiResponseText = await generateVCResponse(fullTranscriptRef.current, deckContext, interactionCount, timeLeftRef.current);
             setIsThinking(false);
+
+            if (!aiResponseText || aiResponseText.trim().length === 0) {
+                console.warn("Empty AI response received, skipping transcript.");
+                setIsThinking(false);
+                setIsSpeaking(false);
+                return;
+            }
 
             addTranscriptItem('assistant', aiResponseText);
             fullTranscriptRef.current.push({ role: 'assistant', content: aiResponseText });
 
             setIsSpeaking(true);
-            await speakText(aiResponseText);
+
+            // SENTENCE-LEVEL STREAMING OPTIMIZATION
+            // Split by sentence but keep punctuation. 
+            // Regex matches sentence endings (. ? !) followed by space or end of string.
+            const sentencer = aiResponseText.match(/[^.!?]+[.!?]+(\s|$)|[^.!?]+$/g) || [aiResponseText];
+
+            if (process.env.NODE_ENV === 'development') {
+                console.log(`[TTS] Streaming ${sentencer.length} sentences:`, sentencer);
+            }
+
+            // 1. Start all downloads in parallel
+            // const audioPromises = sentencer.map(sentence => fetchTTS(sentence.trim()));
+
+            // DISABLED INTERNAL TTS TO PREVENT DOUBLE AUDIO
+            // We are using the high-level useTTS hook in PitchSessionPage again because
+            // the ephemeral key here often lacks TTS permissions.
+            /*
+            // 2. Play them in order as they finish
+            for (const promise of audioPromises) {
+                // Check connectionRef directly to avoid closure staleness
+                if (!connectionRef.current) { 
+                    console.log("Session ended, aborting audio stream.");
+                    break; 
+                }
+                
+                try {
+                    const buffer = await promise;
+                    if (buffer) {
+                         // Double check before playing
+                        if (!connectionRef.current) break;
+                        onAudioDelta(buffer);
+                    }
+                } catch (e) {
+                    console.error("Skipped sentence TTS error", e);
+                }
+            }
+            */
+
             setIsSpeaking(false);
         } catch (err) {
             console.error("AI Logic Error:", err);
             setIsThinking(false);
             setIsSpeaking(false);
         }
-    }, [speakText, deckContext]);
+    }, [fetchTTS, onAudioDelta, deckContext, isConnected]); // Updated dependencies
+
 
     const connect = useCallback(async () => {
         if (connectingRef.current || isConnected) {
@@ -142,8 +217,12 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
 
         try {
             const res = await fetch('/api/deepgram');
+            if (!res.ok) {
+                const errData = await res.json().catch(() => ({}));
+                throw new Error(errData.error || `Deepgram API Error: ${res.status}`);
+            }
             const { key } = await res.json();
-            if (!key) throw new Error("No Deepgram key");
+            if (!key) throw new Error("No Deepgram key received from server.");
             deepgramKeyRef.current = key;
 
             // Determine endpointing based on mode
@@ -208,8 +287,13 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
                 }
             });
 
-            connection.on(LiveTranscriptionEvents.Error, (err) => {
-                console.error("Deepgram Error:", err);
+            connection.on(LiveTranscriptionEvents.Error, (err: any) => {
+                console.error("Deepgram Error (Detailed):", {
+                    message: err?.message || "Unknown Error",
+                    type: err?.type,
+                    code: err?.code,
+                    raw: err
+                });
                 if (connectionRef.current === connection) {
                     setIsConnecting(false);
                     connectingRef.current = false;
@@ -218,9 +302,11 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
             });
 
             connection.on(LiveTranscriptionEvents.UtteranceEnd, () => {
-                // If Deepgram says utterance ended, flush the buffer immediately
+                // DISABLED: UtteranceEnd might be triggering too early, causing fragmentation.
+                // We will rely SOLELY on the debounce timer for now.
+                /*
                 if (transcriptBufferRef.current.trim().length > 0) {
-                    console.log("UtteranceEnd: Flushing buffer");
+                    if (process.env.NODE_ENV === 'development') console.log("UtteranceEnd: Flushing buffer");
                     handleUserMessage(transcriptBufferRef.current);
                     transcriptBufferRef.current = "";
                 }
@@ -228,6 +314,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
                     clearTimeout(disconnectTimeoutRef.current);
                     disconnectTimeoutRef.current = null;
                 }
+                */
             });
 
             connection.on(LiveTranscriptionEvents.Transcript, async (data) => {
@@ -242,6 +329,10 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
 
                 const now = Date.now();
                 const canInterrupt = now - lastInterruptionTimeRef.current > interrogationCooldown;
+
+                /* 
+                // DISABLED: Interim interruptions cause "chunking" issues where the AI replies to partial sentences.
+                // We will rely purely on the final buffered transcript to ensure full context.
 
                 // INTERRUPTION LOGIC
                 // In manual mode, AI NEVER interrupts automatically based on red flags
@@ -278,25 +369,28 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
                             .catch(err => console.error("Logic Guard check failed:", err));
                     }
                 }
+                */
 
                 // BUFFERING LOGIC for Final Transcripts
                 if (data.is_final && sentence.trim().length > 0) {
-                    // Append to buffer
+
+                    // NORMAL BUFFERING
                     transcriptBufferRef.current += " " + sentence;
 
                     // Clear existing debounce timer
-                    if (disconnectTimeoutRef.current) { // Reusing ref name for debounce timer (renaming below for clarity would be better but keeping simple)
+                    if (disconnectTimeoutRef.current) {
                         clearTimeout(disconnectTimeoutRef.current);
                     }
 
                     // Set new debounce timer
                     disconnectTimeoutRef.current = setTimeout(() => {
                         if (transcriptBufferRef.current.trim().length > 0) {
-                            console.log("Debounce: Flushing buffer");
+                            // NORMAL MODES: Flush buffer and respond
+                            if (process.env.NODE_ENV === 'development') console.log("Debounce: Flushing buffer");
                             handleUserMessage(transcriptBufferRef.current);
                             transcriptBufferRef.current = "";
                         }
-                    }, 1500); // Wait 1.5s for more chunks (Increased to prevent fragmentation)
+                    }, voiceMode === 'patient' ? 2500 : 1200);
                 }
             });
 
@@ -334,15 +428,20 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
     }, []);
 
     const addTranscriptItem = (role: 'user' | 'assistant', text: string) => {
-        setTranscriptItems(prev => [
-            ...prev,
-            {
+        setTranscriptItems(prev => {
+            const newItem = {
                 id: crypto.randomUUID(),
                 role,
                 text,
                 timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+            };
+            const newItems = [...prev, newItem];
+            // Sliding window: keep only last 50 items to prevent memory leaks
+            if (newItems.length > 50) {
+                return newItems.slice(newItems.length - 50);
             }
-        ]);
+            return newItems;
+        });
     };
 
     const clearTranscript = useCallback(() => {

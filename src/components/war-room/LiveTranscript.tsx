@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, memo } from "react";
 import { cn } from "@/lib/utils";
 
 export interface TranscriptItem {
@@ -14,7 +14,7 @@ interface TranscriptProps {
     items: TranscriptItem[];
 }
 
-export function LiveTranscript({ items }: TranscriptProps) {
+function LiveTranscriptComponent({ items }: TranscriptProps) {
     const endRef = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -34,7 +34,7 @@ export function LiveTranscript({ items }: TranscriptProps) {
                     </div>
                 )}
 
-                {items.map((item) => (
+                {items.filter(i => i.text && i.text.trim().length > 0).map((item) => (
                     <div key={item.id} className={cn(
                         "flex flex-col space-y-1 animate-in fade-in slide-in-from-bottom-2 duration-300",
                         item.role === "assistant" ? "items-start" : "items-end"
@@ -59,3 +59,5 @@ export function LiveTranscript({ items }: TranscriptProps) {
         </div>
     );
 }
+
+export const LiveTranscript = memo(LiveTranscriptComponent);
