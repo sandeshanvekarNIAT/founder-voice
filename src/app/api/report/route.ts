@@ -16,7 +16,7 @@ interface ReportRequestBody {
 export async function POST(req: Request) {
     console.log(">>> REPORT API: START");
     try {
-        const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+        const groq = new Groq({ apiKey: process.env.GROQ_API_KEY?.trim() });
 
         const body = await req.json().catch(e => {
             console.error(">>> REPORT API: JSON Parse Error", e);

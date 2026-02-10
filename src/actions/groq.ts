@@ -20,7 +20,7 @@ export async function generateVCResponse(transcript: TranscriptItem[], deckConte
     }
 
     const groq = new Groq({
-        apiKey: process.env.GROQ_API_KEY,
+        apiKey: process.env.GROQ_API_KEY.trim(),
     });
 
     // System Prompt for the VC Persona

@@ -12,7 +12,7 @@ export async function GET() {
     }
 
     try {
-        const deepgram = createClient(process.env.DEEPGRAM_API_KEY);
+        const deepgram = createClient(process.env.DEEPGRAM_API_KEY.trim());
 
         let projectId = process.env.DEEPGRAM_PROJECT_ID;
 

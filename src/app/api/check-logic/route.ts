@@ -3,7 +3,7 @@ import Groq from "groq-sdk";
 import { LOGIC_GUARD_PROMPT } from "@/lib/prompts";
 
 const groq = new Groq({
-    apiKey: process.env.GROQ_API_KEY,
+    apiKey: process.env.GROQ_API_KEY?.trim(),
 });
 
 export async function POST(req: NextRequest) {
