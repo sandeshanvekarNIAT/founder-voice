@@ -22,8 +22,8 @@ export default function Home() {
           <div className="flex flex-wrap justify-center items-center gap-12 md:gap-24 opacity-50 grayscale hover:grayscale-0 transition-all duration-500 font-[family-name:var(--font-josefin)]">
             {/* Simple Text Logos for specific tech */}
             <span className="text-xl font-bold flex items-center gap-2 tracking-tight"><Globe className="w-5 h-5 text-blue-500" /> Deepgram</span>
-            <span className="text-xl font-bold flex items-center gap-2 tracking-tight"><Zap className="w-5 h-5 text-orange-500" /> Groq</span>
-            <span className="text-xl font-bold flex items-center gap-2 tracking-tight"><Brain className="w-5 h-5 text-purple-500" /> Gemini 1.5</span>
+            <span className="text-xl font-bold flex items-center gap-2 tracking-tight"><Zap className="w-5 h-5 text-orange-500" /> OpenAI</span>
+            <span className="text-xl font-bold flex items-center gap-2 tracking-tight"><Brain className="w-5 h-5 text-purple-500" /> GPT-4o</span>
             <span className="text-xl font-bold flex items-center gap-2 tracking-tight"><Shield className="w-5 h-5 text-green-500" /> Next.js 15</span>
           </div>
         </div>
@@ -53,15 +53,15 @@ export default function Home() {
               delay={0}
             />
             <FeatureCard
-              title="The Brain: Groq"
-              description="Llama 3 70B running on LPUs provides instant, ruthlessly logical counter-arguments. It doesn't hallucinate; it interrogates."
+              title="The Brain: OpenAI"
+              description="GPT-4o provides instant, ruthlessly logical counter-arguments. It doesn't hallucinate; it interrogates."
               icon={Brain}
               color="#F55036"
               delay={0.2}
             />
             <FeatureCard
-              title="The Judge: Gemini"
-              description="Gemini 1.5 Flash analyzes the full transcript to generate a comprehensive 'Fundability Report Card' with actionable feedback."
+              title="The Judge: OpenAI"
+              description="GPT-4o analyzes the full transcript to generate a comprehensive 'Fundability Report Card' with actionable feedback."
               icon={FileText}
               color="#4E86F8"
               delay={0.4}

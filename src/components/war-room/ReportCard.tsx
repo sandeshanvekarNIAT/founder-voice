@@ -6,22 +6,28 @@ import { cn } from "@/lib/utils";
 interface ScoreProps {
     label: string;
     score: number;
-    color: string; // Tailwind class like 'bg-blue-500'
+    color: string;
+    explanation?: string;
 }
 
-function ScoreMetric({ label, score, color }: ScoreProps) {
+function ScoreMetric({ label, score, color, explanation }: ScoreProps) {
     return (
-        <div className="flex flex-col gap-2 p-4 bg-white/5 rounded-lg border border-white/10">
+        <div className="flex flex-col gap-3 p-4 bg-white/5 rounded-lg border border-white/10 h-full">
             <div className="flex justify-between items-end">
-                <span className="text-muted-foreground text-xs uppercase tracking-wider">{label}</span>
+                <span className="text-muted-foreground text-xs uppercase tracking-wider font-semibold">{label}</span>
                 <span className="text-2xl font-bold font-mono">{score}%</span>
             </div>
-            <div className="h-2 w-full bg-black/50 rounded-full overflow-hidden">
+            <div className="h-2 w-full bg-black/50 rounded-full overflow-hidden mb-1">
                 <div
                     className={cn("h-full transition-all duration-1000", color)}
                     style={{ width: `${score}%` }}
                 />
             </div>
+            {explanation && (
+                <p className="text-xs text-muted-foreground leading-relaxed border-t border-white/5 pt-2 mt-auto">
+                    {explanation}
+                </p>
+            )}
         </div>
     );
 }
@@ -32,6 +38,12 @@ export interface ReportData {
         tech: number;
         economics: number;
         readiness: number;
+    };
+    explanations?: {
+        market: string;
+        tech: string;
+        economics: string;
+        readiness: string;
     };
     summary: string;
     key_risks: string[];
@@ -48,6 +60,13 @@ export function ReportCard({ data }: { data: ReportData }) {
         readiness: 0
     };
 
+    const explanations = data.explanations || {
+        market: "",
+        tech: "",
+        economics: "",
+        readiness: ""
+    };
+
     const risks = Array.isArray(data.key_risks) ? data.key_risks : [];
     const coachability = data.coachability_delta || "Unknown";
 
@@ -56,10 +75,10 @@ export function ReportCard({ data }: { data: ReportData }) {
 
             {/* Scores */}
             <div className="grid grid-cols-2 gap-4">
-                <ScoreMetric label="Market Clarity" score={scores.market} color="bg-chart-1" />
-                <ScoreMetric label="Tech Defensibility" score={scores.tech} color="bg-chart-2" />
-                <ScoreMetric label="Unit Economics" score={scores.economics} color="bg-chart-3" />
-                <ScoreMetric label="Investor Readiness" score={scores.readiness} color="bg-chart-4" />
+                <ScoreMetric label="Market Clarity" score={scores.market} color="bg-chart-1" explanation={explanations.market} />
+                <ScoreMetric label="Tech Defensibility" score={scores.tech} color="bg-chart-2" explanation={explanations.tech} />
+                <ScoreMetric label="Unit Economics" score={scores.economics} color="bg-chart-3" explanation={explanations.economics} />
+                <ScoreMetric label="Investor Readiness" score={scores.readiness} color="bg-chart-4" explanation={explanations.readiness} />
             </div>
 
             {/* Analysis */}

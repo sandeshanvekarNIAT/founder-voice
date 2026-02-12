@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { motion } from "framer-motion";
 import { Mic, ArrowRight, Play } from "lucide-react";
 import Link from "next/link";
+import { IdeaGenerator } from "@/components/landing/IdeaGenerator";
 
 export function Hero() {
     return (
@@ -83,7 +84,7 @@ export function Hero() {
                     className="text-lg md:text-xl text-muted-foreground max-w-2xl mx-auto mb-10 leading-relaxed font-[family-name:var(--font-josefin)]"
                 >
                     Simulate a high-stakes VC meeting with a ruthlessly logical AI.
-                    Test your pitch against the <span className="text-white font-medium">Llama 3 70B</span> brain
+                    Test your pitch against the <span className="text-white font-medium">OpenAI GPT-4o</span> brain
                     and get a real-time fundability report card.
                 </motion.p>
 
@@ -98,9 +99,7 @@ export function Hero() {
                             Enter War Room <ArrowRight className="w-4 h-4 ml-2" />
                         </Button>
                     </Link>
-                    <Button variant="outline" size="lg" className="h-12 px-8 rounded-full border-white/10 hover:bg-white/5 gap-2">
-                        <Play className="w-4 h-4" /> Watch Demo
-                    </Button>
+                    <IdeaGenerator />
                 </motion.div>
             </div>
         </div>

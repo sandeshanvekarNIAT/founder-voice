@@ -15,8 +15,8 @@ export async function POST(req: NextRequest) {
             return NextResponse.json({ error: "Deepgram API Key missing" }, { status: 500 });
         }
 
-        // Deepgram Aura API Endpoint
-        const url = `https://api.deepgram.com/v1/speak?model=aura-asteria-en&encoding=mp3`;
+        // Deepgram Aura API Endpoint (Orion = Deep Male Voice)
+        const url = `https://api.deepgram.com/v1/speak?model=aura-orion-en&encoding=mp3`;
 
         const response = await fetch(url, {
             method: "POST",

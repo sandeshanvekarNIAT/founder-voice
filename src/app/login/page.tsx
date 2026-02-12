@@ -3,13 +3,14 @@
 
 import { useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
-import { useRouter } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
+import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 // import { Icons } from '@/components/ui/icons' // Assuming you have an Icons component, otherwise I'll mock it or use Lucide
-import { Loader2, Sparkles } from 'lucide-react'
+import { Loader2, Sparkles, ArrowLeft } from 'lucide-react'
 
 export default function LoginPage() {
     const [email, setEmail] = useState('')
@@ -19,31 +20,65 @@ export default function LoginPage() {
     const router = useRouter()
     const supabase = createClient()
 
-    const handleLogin = async (e: React.FormEvent) => {
+    const searchParams = useSearchParams()
+    const next = searchParams.get('next')
+
+    const [isSignUp, setIsSignUp] = useState(false)
+
+    const handleAuth = async (e: React.FormEvent) => {
         e.preventDefault()
         setIsLoading(true)
         setError(null)
 
-        const { error } = await supabase.auth.signInWithPassword({
-            email,
-            password,
-        })
+        if (isSignUp) {
+            const { error } = await supabase.auth.signUp({
+                email,
+                password,
+                options: {
+                    emailRedirectTo: `${window.location.origin}/auth/callback?next=${next || '/pitch'}`,
+                },
+            })
 
-        if (error) {
-            setError(error.message)
-            setIsLoading(false)
+            if (error) {
+                setError(error.message)
+                setIsLoading(false)
+            } else {
+                // Check if email confirmation is required
+                setError("Check your email for the confirmation link!")
+                setIsLoading(false)
+            }
         } else {
-            router.push('/pitch')
-            router.refresh()
+            const { error } = await supabase.auth.signInWithPassword({
+                email,
+                password,
+            })
+
+            if (error) {
+                setError(error.message)
+                setIsLoading(false)
+            } else {
+                router.push(next || '/pitch')
+                router.refresh()
+            }
         }
     }
 
     const handleGoogleLogin = async () => {
         setIsLoading(true)
+        // FORCE LOCALHOST for debugging
+        const origin = window.location.hostname === 'localhost' ? 'http://localhost:3000' : window.location.origin
+        const redirectTo = new URL(`${origin}/auth/callback`)
+
+        if (next) {
+            redirectTo.searchParams.set('next', next)
+        }
+
+        console.log("Redirecting to:", redirectTo.toString()) // Debug log
+
         const { error } = await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
-                redirectTo: `${window.location.origin}/auth/callback`,
+                redirectTo: redirectTo.toString(),
             },
         })
 
@@ -54,7 +89,15 @@ export default function LoginPage() {
     }
 
     return (
-        <div className="min-h-screen bg-black flex items-center justify-center p-4">
+        <div className="min-h-screen bg-black flex items-center justify-center p-4 relative">
+            <div className="absolute top-4 left-4 sm:top-8 sm:left-8 z-20">
+                <Link href="/">
+                    <Button variant="ghost" className="text-zinc-400 hover:text-white pl-0 hover:bg-transparent">
+                        <ArrowLeft className="w-5 h-5 mr-2" />
+                        Back
+                    </Button>
+                </Link>
+            </div>
             {/* Background Effects */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
                 <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-purple-900/30 rounded-full blur-3xl opacity-50" />
@@ -66,9 +109,13 @@ export default function LoginPage() {
                     <div className="mx-auto bg-zinc-900 p-3 rounded-full w-12 h-12 flex items-center justify-center mb-4 border border-zinc-800">
                         <Sparkles className="w-6 h-6 text-purple-400" />
                     </div>
-                    <CardTitle className="text-2xl font-bold tracking-tight">Welcome back</CardTitle>
+                    <CardTitle className="text-2xl font-bold tracking-tight">
+                        {isSignUp ? "Create an account" : "Welcome back"}
+                    </CardTitle>
                     <CardDescription className="text-zinc-400">
-                        Enter your credentials to access the War Room
+                        {isSignUp
+                            ? "Enter your email to create your account"
+                            : "Enter your credentials to access the War Room"}
                     </CardDescription>
                 </CardHeader>
                 <CardContent className="grid gap-4">
@@ -97,7 +144,7 @@ export default function LoginPage() {
                                     />
                                 </svg>
                             )}{" "}
-                            Continue with Google
+                            {isSignUp ? "Sign up with Google" : "Continue with Google"}
                         </Button>
                     </div>
                     <div className="relative">
@@ -108,7 +155,7 @@ export default function LoginPage() {
                             <span className="bg-zinc-950 px-2 text-zinc-400">Or continue with</span>
                         </div>
                     </div>
-                    <form onSubmit={handleLogin}>
+                    <form onSubmit={handleAuth}>
                         <div className="grid gap-4">
                             <div className="grid gap-2">
                                 <Label htmlFor="email">Email</Label>
@@ -135,24 +182,35 @@ export default function LoginPage() {
                             </div>
 
                             {error && (
-                                <div className="text-red-400 text-sm text-center">
+                                <div className={error.includes("Check your email") ? "text-green-400 text-sm text-center" : "text-red-400 text-sm text-center"}>
                                     {error}
                                 </div>
                             )}
 
                             <Button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white" disabled={isLoading}>
                                 {isLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Sign In
+                                {isSignUp ? "Create Account" : "Sign In"}
                             </Button>
                         </div>
                     </form>
                 </CardContent>
                 <CardFooter className="flex justify-center">
-                    <Button variant="link" className="text-zinc-500 hover:text-white text-xs">
-                        Don't have an account? Sign Up
+                    <Button
+                        variant="link"
+                        className="text-zinc-500 hover:text-white text-xs"
+                        onClick={() => {
+                            setIsSignUp(!isSignUp)
+                            setError(null)
+                        }}
+                    >
+                        {isSignUp
+                            ? "Already have an account? Sign In"
+                            : "Don't have an account? Sign Up"}
                     </Button>
                 </CardFooter>
             </Card>
+
+            {/* DEBUG INFO - REMOVE IN PROD */}
         </div>
     )
 }

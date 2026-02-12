@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { TranscriptItem } from '@/components/war-room/LiveTranscript';
 import { createClient, LiveClient, LiveSchema, LiveTranscriptionEvents } from "@deepgram/sdk";
-import { generateVCResponse } from '@/actions/groq';
+import { generateVCResponse } from '@/actions/openai';
 import { VoiceMode } from '@/components/war-room/VoiceSettings';
 
 interface UseRealtimeProps {
@@ -11,9 +11,10 @@ interface UseRealtimeProps {
     deckContext: string | null;
     voiceMode: VoiceMode;
     timeLeftRef: React.MutableRefObject<number>;
+    sampleRate?: number; // Optional, defaults to 24000
 }
 
-export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deckContext, voiceMode, timeLeftRef }: UseRealtimeProps) => {
+export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deckContext, voiceMode, timeLeftRef, sampleRate = 24000 }: UseRealtimeProps) => {
     const [isConnected, setIsConnected] = useState(false);
     const [isConnecting, setIsConnecting] = useState(false);
     const connectingRef = useRef(false); // Synchronous lock
@@ -194,7 +195,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
     }, [fetchTTS, onAudioDelta, deckContext, isConnected]); // Updated dependencies
 
 
-    const connect = useCallback(async () => {
+    const connect = useCallback(async (manualSampleRate?: number) => {
         if (connectingRef.current || isConnected) {
             console.log("Connection attempt ignored: already connecting or connected.");
             return;
@@ -248,7 +249,7 @@ export const useRealtime = ({ onAudioDelta, onInterruption, onInterrogated, deck
                 smart_format: true,
                 interim_results: true,
                 encoding: "linear16",
-                sample_rate: 24000,
+                sample_rate: manualSampleRate || sampleRate || 24000,
                 endpointing: endpointing,
                 utterance_end_ms: utteranceEndMs,
             });

@@ -16,16 +16,18 @@ export async function GET(request: NextRequest) {
         const { error } = await supabase.auth.exchangeCodeForSession(code)
 
         if (!error) {
-            const forwardedHost = request.headers.get('x-forwarded-host') // original origin before load balancer
+            const forwardedHost = request.headers.get('x-forwarded-host')
             const isLocalEnv = process.env.NODE_ENV === 'development'
 
+            // Ensure next is a relative path
+            const cleanNext = next.startsWith('/') ? next : '/pitch'
+
             if (isLocalEnv) {
-                // we can be sure that there is no load balancer in between, so no need to watch for X-Forwarded-Host
-                return NextResponse.redirect(`${request.nextUrl.origin}${next}`)
+                return NextResponse.redirect(`${request.nextUrl.origin}${cleanNext}`)
             } else if (forwardedHost) {
-                return NextResponse.redirect(`https://${forwardedHost}${next}`)
+                return NextResponse.redirect(`https://${forwardedHost}${cleanNext}`)
             } else {
-                return NextResponse.redirect(`${request.nextUrl.origin}${next}`)
+                return NextResponse.redirect(`${request.nextUrl.origin}${cleanNext}`)
             }
         } else {
             console.error("Auth Callback Error:", error)

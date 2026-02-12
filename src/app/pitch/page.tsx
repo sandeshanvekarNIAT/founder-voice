@@ -28,7 +28,17 @@ export default function PitchSessionPage() {
     const [deckContext, setDeckContext] = useState<string | null>(null);
     const [activeClaim, setActiveClaim] = useState<string | null>(null);
     const [voiceMode, setVoiceMode] = useState<VoiceMode>('patient'); // Default to Patient Mode
+    const [contextLabel, setContextLabel] = useState<string>("Previous Context");
     const { signOut } = useAuth();
+
+    useEffect(() => {
+        const storedContext = sessionStorage.getItem('founder_voice_context');
+        if (storedContext) {
+            setDeckContext(storedContext);
+            setContextLabel("Generated Idea");
+            sessionStorage.removeItem('founder_voice_context'); // Clear after use
+        }
+    }, []);
 
     const { initAudio, addToQueue, clearQueue, isPlaying } = useAudioPlayer();
     const { speak, stop: stopTTS, isPlaying: isTTSPlaying } = useTTS();
@@ -51,6 +61,15 @@ export default function PitchSessionPage() {
 
     const timeLeftRef = useRef<number>(300); // Track time for AI context
 
+    // Audio Recorder Hook (Must be declared before useRealtime to pass sampleRate)
+    // We need a mutable ref for the data handler because 'sendAudio' comes from useRealtime later
+    const onAudioDataRef = useRef<((base64: string) => void) | null>(null);
+
+    const { startRecording, stopRecording, isRecording, stream, sampleRate } = useAudioRecorder((base64) => {
+        if (onAudioDataRef.current) onAudioDataRef.current(base64);
+    });
+
+    // 2. Call useRealtime with collecting the sampleRate
     const {
         connect,
         disconnect,
@@ -59,46 +78,52 @@ export default function PitchSessionPage() {
         sendAudio,
         transcriptItems,
         clearTranscript,
-        manualTrigger // Get manual trigger function
+        manualTrigger
     } = useRealtime({
         onAudioDelta: handleAudioDelta,
         onInterruption: handleInterruption,
         onInterrogated: handleInterrogated,
         deckContext,
-        voiceMode, // Pass selected mode
-        timeLeftRef // Pass time context
+        voiceMode,
+        timeLeftRef,
+        sampleRate: sampleRate || 24000
     });
 
-    // Auto-speak new assistant messages (Restored but strictly gated)
+    // 3. Now define the actual handler and assign to ref
+    useEffect(() => {
+        onAudioDataRef.current = (base64: string) => {
+            if (isConnected && !isTTSPlaying) {
+                sendAudio(base64);
+            } else if (!isConnected && status === 'PITCHING') {
+                // console.warn("Audio Data Dropped"); // Reduce spam
+            }
+        };
+    }, [isConnected, isTTSPlaying, status, sendAudio]);
+
+    // Track last spoken message to prevent re-triggering
+    const lastSpokenIdRef = useRef<string | null>(null);
+
+    // Auto-speak new assistant messages
     useEffect(() => {
         if (status === 'PITCHING' && isConnected && transcriptItems.length > 0) {
             const lastItem = transcriptItems[transcriptItems.length - 1];
-            if (lastItem.role === 'assistant') {
+            if (lastItem.role === 'assistant' && lastItem.id !== lastSpokenIdRef.current) {
+                lastSpokenIdRef.current = lastItem.id;
                 speak(lastItem.text);
             }
         }
     }, [transcriptItems, speak, status, isConnected]);
 
 
-    // Audio is now handled entirely by useRealtime streaming to useAudioPlayer
-    // The previous useEffect that triggered speak() was causing double audio and zombie playback.
-
-    // Auto-scroll logic could go here if needed, but LiveTranscript handles it internally.
-
-    const handleRecordingData = useCallback((base64: string) => {
-        if (isConnected && !isTTSPlaying) { // Don't record while AI is speaking
-            sendAudio(base64);
-        }
-    }, [isConnected, sendAudio, isTTSPlaying]);
-
-    const { startRecording, stopRecording, isRecording, stream } = useAudioRecorder(handleRecordingData);
-
     const handleStartSession = useCallback(async () => {
         setReportData(null);
-        await initAudio(); // Activate browser audio engine
-        await connect();
+        await initAudio(); // Activate browser audio engine (Playback)
+        const micSampleRate = await startRecording(); // Activate microphone (Capture) & Get Rate
+
+        console.log("Starting Deepgram with Sample Rate:", micSampleRate || 24000);
+        await connect(micSampleRate || undefined); // Connect to Deepgram with explicit rate
         setStatus('PITCHING');
-    }, [initAudio, connect]);
+    }, [initAudio, startRecording, connect]);
 
     const handleResetSession = useCallback(async () => {
         stopRecording();
@@ -176,25 +201,19 @@ export default function PitchSessionPage() {
         }
     }, [status, stopRecording, disconnect, clearQueue, transcriptItems, deckContext, stopTTS]);
 
-    // Auto-start recording when connected
-    useEffect(() => {
-        if (isConnected && !isRecording) {
-            startRecording();
-        }
-    }, [isConnected, isRecording, startRecording]);
-
-    // Cleanup on unmount or session end
-    useEffect(() => {
-        return () => {
-            stopRecording();
-            stopTTS();
-            disconnect();
-        };
-    }, [stopRecording, stopTTS, disconnect]);
+    const handleRetrySetup = useCallback(async () => {
+        stopRecording();
+        stopTTS();
+        disconnect();
+        clearQueue();
+        clearTranscript();
+        setStatus('IDLE');
+        setReportData(null);
+        // Do NOT clear deckContext, so user can retry immediately
+    }, [stopRecording, disconnect, clearQueue, clearTranscript, stopTTS]);
 
     return (
         <div className="min-h-screen bg-background text-foreground p-8 flex flex-col gap-6 font-sans">
-
             {/* Header / Status Bar */}
             <div className="flex justify-between items-center border-b border-white/10 pb-4">
                 <div className="flex items-center gap-4">
@@ -231,7 +250,7 @@ export default function PitchSessionPage() {
                         <div className="space-y-6">
                             <Card className="p-6 bg-card border-white/10 flex items-center justify-between">
                                 <h2 className="text-xl font-bold">FUNDABILITY REPORT CARD</h2>
-                                <Button onClick={handleStartSession} variant="outline">RETRY PITCH</Button>
+                                <Button onClick={handleRetrySetup} variant="outline">RETRY PITCH</Button>
                             </Card>
                             <ReportCard data={reportData} />
                         </div>
@@ -259,7 +278,11 @@ export default function PitchSessionPage() {
                                         <div className="flex gap-4">
                                             {status === 'IDLE' ? (
                                                 <div className="flex flex-col gap-4 w-full max-w-sm">
-                                                    <DeckUploader onDeckLoaded={setDeckContext} />
+                                                    <DeckUploader
+                                                        onDeckLoaded={setDeckContext}
+                                                        initialContext={deckContext}
+                                                        contextLabel={contextLabel}
+                                                    />
                                                     <Button
                                                         onClick={handleStartSession}
                                                         size="lg"

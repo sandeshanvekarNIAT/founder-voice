@@ -9,26 +9,52 @@ export const useAudioRecorder = (onAudioData: (base64: string) => void) => {
     const workletNodeRef = useRef<AudioWorkletNode | null>(null);
     const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
 
+    // State for sample rate to pass to Deepgram
+    const [sampleRate, setSampleRate] = useState<number>(AUDIO_SAMPLE_RATE);
+
     const startRecording = useCallback(async () => {
         try {
+            // ... (previous getUserMedia code) ...
             const stream = await navigator.mediaDevices.getUserMedia({
                 audio: {
                     channelCount: 1,
                     echoCancellation: true,
                     autoGainControl: true,
                     noiseSuppression: true,
-                    sampleRate: AUDIO_SAMPLE_RATE
+                    // Remove ideal sampleRate to avoid constraints error, we will read actual rate later
                 }
             });
 
             streamRef.current = stream;
             setStream(stream);
 
-            const audioContext = new AudioContext({ sampleRate: AUDIO_SAMPLE_RATE });
+            const audioContext = new AudioContext(); // Let browser decide rate
             audioContextRef.current = audioContext;
+            setSampleRate(audioContext.sampleRate);
+            console.log(`[AudioRecorder] Microphone started at ${audioContext.sampleRate}Hz`);
 
-            // Load the custom audio processor worklet
-            await audioContext.audioWorklet.addModule('/audio-processor.js');
+            if (audioContext.state === 'suspended') {
+                await audioContext.resume();
+            }
+
+            // Inline Worklet Code to avoid file loading issues
+            const workletCode = `
+                class AudioProcessor extends AudioWorkletProcessor {
+                    process(inputs, outputs, parameters) {
+                        const input = inputs[0];
+                        if (input && input.length > 0) {
+                            this.port.postMessage(input[0]);
+                        }
+                        return true;
+                    }
+                }
+                registerProcessor('audio-processor', AudioProcessor);
+            `;
+
+            const blob = new Blob([workletCode], { type: 'application/javascript' });
+            const workletUrl = URL.createObjectURL(blob);
+
+            await audioContext.audioWorklet.addModule(workletUrl);
 
             const source = audioContext.createMediaStreamSource(stream);
             sourceRef.current = source;
@@ -38,9 +64,15 @@ export const useAudioRecorder = (onAudioData: (base64: string) => void) => {
 
             workletNode.port.onmessage = (event) => {
                 const inputData = event.data;
-                const pcm16 = floatTo16BitPCM(inputData);
-                const base64 = arrayBufferToBase64(pcm16);
-                onAudioData(base64);
+                if (inputData && inputData.length > 0) {
+                    const pcm16 = floatTo16BitPCM(inputData);
+                    const base64 = arrayBufferToBase64(pcm16);
+                    onAudioData(base64);
+                }
+            };
+
+            workletNode.onprocessorerror = (err) => {
+                console.error("Audio Worklet Processor Error:", err);
             };
 
             source.connect(workletNode);
@@ -48,9 +80,12 @@ export const useAudioRecorder = (onAudioData: (base64: string) => void) => {
 
             setIsRecording(true);
 
+            return audioContext.sampleRate; // Return rate for sync usage
+
         } catch (err) {
-            console.error('Error starting audio with AudioWorklet:', err);
-            // Fallback or alert could go here
+            console.error('Error starting audio with Inline Worklet:', err);
+            alert(`Microphone Error: ${err instanceof Error ? err.message : String(err)}`);
+            return null;
         }
     }, [onAudioData]);
 
@@ -76,6 +111,6 @@ export const useAudioRecorder = (onAudioData: (base64: string) => void) => {
         setIsRecording(false);
     }, []);
 
-    return { isRecording, startRecording, stopRecording, stream };
+    return { isRecording, startRecording, stopRecording, stream, sampleRate };
 };
 

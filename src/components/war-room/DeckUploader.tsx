@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { useDropzone } from "react-dropzone";
 import { Upload, FileText, CheckCircle, Loader2, X } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -8,12 +8,23 @@ import { motion, AnimatePresence } from "framer-motion";
 
 interface DeckUploaderProps {
     onDeckLoaded: (text: string) => void;
+    initialContext?: string | null;
+    contextLabel?: string;
 }
 
-export function DeckUploader({ onDeckLoaded }: DeckUploaderProps) {
+export function DeckUploader({ onDeckLoaded, initialContext, contextLabel = "Previous Context" }: DeckUploaderProps) {
+    const [mode, setMode] = useState<'upload' | 'text'>('upload');
+    const [textInput, setTextInput] = useState("");
     const [isUploading, setIsUploading] = useState(false);
-    const [fileName, setFileName] = useState<string | null>(null);
+    const [fileName, setFileName] = useState<string | null>(initialContext ? contextLabel : null);
     const [uploadProgress, setUploadProgress] = useState(0);
+
+    // Sync state if initialContext changes from parent (e.g. async load or retry)
+    useEffect(() => {
+        if (initialContext && !fileName) {
+            setFileName(contextLabel);
+        }
+    }, [initialContext, contextLabel, fileName]);
 
     const onDrop = useCallback(async (acceptedFiles: File[]) => {
         const file = acceptedFiles[0];
@@ -74,8 +85,38 @@ export function DeckUploader({ onDeckLoaded }: DeckUploaderProps) {
         onDeckLoaded(""); // Clear context
     };
 
+    const handleTextSubmit = () => {
+        if (!textInput.trim()) return;
+        onDeckLoaded(textInput);
+        // Visual feedback or lock?
+    };
+
     return (
-        <div className="w-full">
+        <div className="w-full space-y-4">
+            {/* Toggle Tabs */}
+            {!fileName && (
+                <div className="flex p-1 bg-white/5 rounded-lg border border-white/10 w-fit mx-auto">
+                    <button
+                        onClick={() => setMode('upload')}
+                        className={cn(
+                            "px-4 py-1.5 text-xs font-medium rounded-md transition-all",
+                            mode === 'upload' ? "bg-primary text-white shadow-sm" : "text-zinc-400 hover:text-white"
+                        )}
+                    >
+                        Upload Deck
+                    </button>
+                    <button
+                        onClick={() => setMode('text')}
+                        className={cn(
+                            "px-4 py-1.5 text-xs font-medium rounded-md transition-all",
+                            mode === 'text' ? "bg-primary text-white shadow-sm" : "text-zinc-400 hover:text-white"
+                        )}
+                    >
+                        Paste Idea
+                    </button>
+                </div>
+            )}
+
             <AnimatePresence mode="wait">
                 {fileName ? (
                     <motion.div
@@ -87,22 +128,22 @@ export function DeckUploader({ onDeckLoaded }: DeckUploaderProps) {
                     >
                         <div className="flex items-center gap-3">
                             <div className="p-2 bg-green-500/20 rounded-lg">
-                                <CheckCircle className="w-5 h-5 text-green-400" />
+                                {mode === 'upload' ? <CheckCircle className="w-5 h-5 text-green-400" /> : <FileText className="w-5 h-5 text-green-400" />}
                             </div>
                             <div>
-                                <p className="text-sm font-semibold text-green-100">Deck Loaded Successfully</p>
-                                <p className="text-xs text-green-400/80">{fileName}</p>
+                                <p className="text-sm font-semibold text-green-100">Context Loaded Successfully</p>
+                                <p className="text-xs text-green-400/80">{mode === 'upload' ? fileName : 'Text Idea Provided'}</p>
                             </div>
                         </div>
                         <button
                             onClick={resetUpload}
                             className="p-2 hover:bg-white/10 rounded-full transition-colors opacity-0 group-hover:opacity-100"
-                            title="Remove file"
+                            title="Remove context"
                         >
                             <X className="w-4 h-4 text-white/70" />
                         </button>
                     </motion.div>
-                ) : (
+                ) : mode === 'upload' ? (
                     <motion.div
                         key="dropzone"
                         initial={{ opacity: 0, y: 10 }}
@@ -110,7 +151,7 @@ export function DeckUploader({ onDeckLoaded }: DeckUploaderProps) {
                         exit={{ opacity: 0, y: -10 }}
                         {...(getRootProps() as any)}
                         className={cn(
-                            "relative border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all duration-300 overflow-hidden",
+                            "relative border-2 border-dashed rounded-xl p-8 flex flex-col items-center justify-center cursor-pointer transition-all duration-300 overflow-hidden min-h-[200px]",
                             isDragActive
                                 ? "border-primary bg-primary/10 shadow-[0_0_20px_rgba(var(--primary),0.2)]"
                                 : "border-white/10 hover:border-white/20 hover:bg-white/5",
@@ -152,6 +193,33 @@ export function DeckUploader({ onDeckLoaded }: DeckUploaderProps) {
                                 </div>
                             </>
                         )}
+                    </motion.div>
+                ) : (
+                    <motion.div
+                        key="text-input"
+                        initial={{ opacity: 0, y: 10 }}
+                        animate={{ opacity: 1, y: 0 }}
+                        exit={{ opacity: 0, y: -10 }}
+                        className="space-y-4 min-h-[200px]"
+                    >
+                        <textarea
+                            className="flex min-h-[150px] w-full rounded-md border border-white/10 bg-white/5 px-3 py-2 text-sm text-white placeholder:text-zinc-500 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-primary disabled:cursor-not-allowed disabled:opacity-50 resize-none"
+                            placeholder="Describe your startup here... (e.g., 'Uber for Dog Walking. We solve the problem of busy owners...')"
+                            value={textInput}
+                            onChange={(e) => setTextInput(e.target.value)}
+                        />
+                        <button
+                            onClick={() => {
+                                if (textInput.trim()) {
+                                    onDeckLoaded(textInput);
+                                    setFileName("Text Description");
+                                }
+                            }}
+                            disabled={!textInput.trim()}
+                            className="w-full py-2 bg-primary hover:bg-primary/90 text-white rounded-md text-sm font-medium disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                            Set Context
+                        </button>
                     </motion.div>
                 )}
             </AnimatePresence>
