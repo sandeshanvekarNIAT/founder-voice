@@ -16,19 +16,16 @@ export async function GET(request: NextRequest) {
         const { error } = await supabase.auth.exchangeCodeForSession(code)
 
         if (!error) {
-            const forwardedHost = request.headers.get('x-forwarded-host')
             const isLocalEnv = process.env.NODE_ENV === 'development'
+
+            // Get the actual origin of the request (e.g. https://founder-voice.vercel.app)
+            const origin = request.nextUrl.origin
 
             // Ensure next is a relative path
             const cleanNext = next.startsWith('/') ? next : '/pitch'
 
-            if (isLocalEnv) {
-                return NextResponse.redirect(`${request.nextUrl.origin}${cleanNext}`)
-            } else if (forwardedHost) {
-                return NextResponse.redirect(`https://${forwardedHost}${cleanNext}`)
-            } else {
-                return NextResponse.redirect(`${request.nextUrl.origin}${cleanNext}`)
-            }
+            // Always redirect to the same origin where the request came from
+            return NextResponse.redirect(`${origin}${cleanNext}`)
         } else {
             console.error("Auth Callback Error:", error)
         }
