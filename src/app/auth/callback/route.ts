@@ -20,10 +20,11 @@ export async function GET(request: NextRequest) {
 
             // Get the actual origin of the request
             // Vercel / Next.js often puts the real host in 'host' header or 'x-forwarded-host'
-            const host = request.headers.get('host')
+            const host = request.headers.get('x-forwarded-host') || request.headers.get('host')
             const protocol = request.headers.get('x-forwarded-proto') || 'https'
 
-            // Fallback to nextUrl.origin if host header is missing (unlikely)
+            // Fallback to nextUrl.origin ONLY if we really can't find a host
+            // CAUTION: request.nextUrl.origin on Vercel is often http://localhost:3000 internally
             const origin = host ? `${protocol}://${host}` : request.nextUrl.origin
 
             // Ensure next is a relative path

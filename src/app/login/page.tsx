@@ -64,8 +64,8 @@ function LoginForm() {
 
     const handleGoogleLogin = async () => {
         setIsLoading(true)
-        // FORCE LOCALHOST for debugging
-        const origin = window.location.hostname === 'localhost' ? 'http://localhost:3000' : window.location.origin
+        // Use reliable window.location.origin
+        const origin = window.location.origin
         const redirectTo = new URL(`${origin}/auth/callback`)
 
         if (next) {
