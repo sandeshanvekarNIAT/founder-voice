@@ -18,8 +18,13 @@ export async function GET(request: NextRequest) {
         if (!error) {
             const isLocalEnv = process.env.NODE_ENV === 'development'
 
-            // Get the actual origin of the request (e.g. https://founder-voice.vercel.app)
-            const origin = request.nextUrl.origin
+            // Get the actual origin of the request
+            // Vercel / Next.js often puts the real host in 'host' header or 'x-forwarded-host'
+            const host = request.headers.get('host')
+            const protocol = request.headers.get('x-forwarded-proto') || 'https'
+
+            // Fallback to nextUrl.origin if host header is missing (unlikely)
+            const origin = host ? `${protocol}://${host}` : request.nextUrl.origin
 
             // Ensure next is a relative path
             const cleanNext = next.startsWith('/') ? next : '/pitch'
