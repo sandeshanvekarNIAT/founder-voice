@@ -1,7 +1,7 @@
 
 'use client'
 
-import { useState } from 'react'
+import { Suspense, useState } from 'react'
 import { createClient } from '@/lib/supabase/client'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
@@ -9,10 +9,9 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
-// import { Icons } from '@/components/ui/icons' // Assuming you have an Icons component, otherwise I'll mock it or use Lucide
 import { Loader2, Sparkles, ArrowLeft } from 'lucide-react'
 
-export default function LoginPage() {
+function LoginForm() {
     const [email, setEmail] = useState('')
     const [password, setPassword] = useState('')
     const [isLoading, setIsLoading] = useState(false)
@@ -212,5 +211,13 @@ export default function LoginPage() {
 
             {/* DEBUG INFO - REMOVE IN PROD */}
         </div>
+    )
+}
+
+export default function LoginPage() {
+    return (
+        <Suspense fallback={<div className="min-h-screen bg-black flex items-center justify-center text-white"><Loader2 className="w-8 h-8 animate-spin text-purple-600" /></div>}>
+            <LoginForm />
+        </Suspense>
     )
 }
