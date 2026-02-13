@@ -16,16 +16,10 @@ export async function GET(request: NextRequest) {
         const { error } = await supabase.auth.exchangeCodeForSession(code)
 
         if (!error) {
-            const isLocalEnv = process.env.NODE_ENV === 'development'
-
-            // Get the actual origin of the request
-            // Vercel / Next.js often puts the real host in 'host' header or 'x-forwarded-host'
-            const host = request.headers.get('x-forwarded-host') || request.headers.get('host')
-            const protocol = request.headers.get('x-forwarded-proto') || 'https'
-
-            // Fallback to nextUrl.origin ONLY if we really can't find a host
-            // CAUTION: request.nextUrl.origin on Vercel is often http://localhost:3000 internally
-            const origin = host ? `${protocol}://${host}` : request.nextUrl.origin
+            // Nuclear Option 2.0: Don't trust NODE_ENV. Check Host Header.
+            const host = request.headers.get('host') || ''
+            const isLocal = host.includes('localhost') || host.includes('127.0.0.1')
+            const origin = isLocal ? request.nextUrl.origin : 'https://founder-voice.vercel.app'
 
             // Ensure next is a relative path
             const cleanNext = next.startsWith('/') ? next : '/pitch'

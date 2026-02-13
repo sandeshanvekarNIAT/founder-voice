@@ -64,25 +64,22 @@ function LoginForm() {
 
     const handleGoogleLogin = async () => {
         setIsLoading(true)
-        // Use reliable window.location.origin
-        const origin = window.location.origin
-        const redirectTo = new URL(`${origin}/auth/callback`)
 
-        if (next) {
-            redirectTo.searchParams.set('next', next)
-        }
+        // Nuclear Option 5.0: SIMPLICITY
+        // Remove query params to ensure strict match with Supabase Allowlist.
+        // Use hardcoded production URL.
+        const finalRedirect = 'https://founder-voice.vercel.app/auth/callback'
 
-        console.log("Redirecting to:", redirectTo.toString()) // Debug log
-
+        // No alerts. Just go.
         const { error } = await supabase.auth.signInWithOAuth({
             provider: 'google',
             options: {
-                redirectTo: redirectTo.toString(),
+                redirectTo: finalRedirect,
             },
         })
 
         if (error) {
-            setError(error.message)
+            alert(`Auth Error: ${error.message}`)
             setIsLoading(false)
         }
     }
